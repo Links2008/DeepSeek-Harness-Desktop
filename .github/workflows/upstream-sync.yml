@@ -1,0 +1,154 @@
+name: Follow DeepSeek Harness upstream
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when the upstream commit is unchanged
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: deepseek-harness-upstream
+  cancel-in-progress: false
+
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out desktop shell
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check out DeepSeek Harness
+        uses: actions/checkout@v7
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: master
+          path: upstream
+
+      - name: Detect an upstream change
+        id: upstream
+        shell: pwsh
+        run: |
+          $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
+          $sha = git -C upstream rev-parse HEAD
+          $manifest = Get-Content upstream/package.json -Raw | ConvertFrom-Json
+          $changed = ($sha -ne $lock.commit) -or ('${{ inputs.force }}' -eq 'true')
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "version=$($manifest.version)" >> $env:GITHUB_OUTPUT
+          "changed=$($changed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Stop when already current
+        if: steps.upstream.outputs.changed != 'true'
+        run: Write-Host "Desktop runtime already follows ${{ steps.upstream.outputs.sha }}"
+
+      - name: Set up Node.js
+        if: steps.upstream.outputs.changed == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Build upstream release families
+        if: steps.upstream.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+          Push-Location upstream
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm run release:pack --family vendor --out ..\packed-vendor
+          pnpm run release:pack --family dsh --out ..\packed-dsh
+          Pop-Location
+
+      - name: Assemble the independent Windows runtime
+        if: steps.upstream.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          node scripts/create-runtime-manifest.mjs bundle/dsh-runtime packed-vendor packed-dsh
+          Push-Location bundle/dsh-runtime
+          npm install --no-audit --no-fund --package-lock=false --include=optional
+          $runtime = Get-Content package.json -Raw | ConvertFrom-Json
+          $runtime.PSObject.Properties.Remove('dependencies')
+          $runtime | ConvertTo-Json -Depth 10 | Set-Content package.json -Encoding utf8NoBOM
+          Pop-Location
+          New-Item -ItemType Directory -Path bundle/node -Force | Out-Null
+          Copy-Item (Get-Command node.exe).Source bundle/node/node.exe
+
+      - name: Build and test the desktop release
+        if: steps.upstream.outputs.changed == 'true'
+        id: desktop
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund
+          npm version patch --no-git-tag-version
+          $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
+          $lock.commit = '${{ steps.upstream.outputs.sha }}'
+          $lock.version = '${{ steps.upstream.outputs.version }}'
+          $lock | ConvertTo-Json | Set-Content upstream-lock.json -Encoding utf8NoBOM
+          npm test
+          npm run build:installer
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "installer=installer-dist/DeepSeekHarness-Setup-$version.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Verify archive and installed runtime
+        if: steps.upstream.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          & 'C:\Program Files\7-Zip\7z.exe' t '${{ steps.desktop.outputs.installer }}'
+          $installer = Resolve-Path '${{ steps.desktop.outputs.installer }}'
+          $process = Start-Process $installer -ArgumentList '/S' -PassThru
+          $process.WaitForExit()
+          if ($process.ExitCode -ne 0) { throw "Installer failed with $($process.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\DeepSeekHarness\DeepSeekHarness.exe"
+          if (!(Test-Path $app)) { throw 'Installed executable is missing' }
+          Start-Process $app
+          $ready = $false
+          for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            Start-Sleep -Seconds 2
+            try {
+              if ((Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) {
+                $ready = $true
+                break
+              }
+            } catch {}
+          }
+          if (!$ready) { throw 'HTTP 200 health check failed' }
+          Get-CimInstance Win32_Process | Where-Object ExecutablePath -Like "$env:LOCALAPPDATA\Programs\DeepSeekHarness\*" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+      - name: Attest the installer
+        if: steps.upstream.outputs.changed == 'true'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ steps.desktop.outputs.installer }}
+
+      - name: Commit the followed upstream version
+        if: steps.upstream.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package.json package-lock.json upstream-lock.json
+          git commit -m "Follow DeepSeek Harness ${{ steps.upstream.outputs.version }}"
+          git push origin HEAD:main
+
+      - name: Publish the tested update
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = '${{ steps.desktop.outputs.version }}'
+          gh release create "v$version" '${{ steps.desktop.outputs.installer }}' installer-dist/latest.yml --repo '${{ github.repository }}' --target main --title "DeepSeek Harness Desktop v$version" --notes "Automatically follows DeepSeek Harness ${{ steps.upstream.outputs.version }} at ${{ steps.upstream.outputs.sha }}. The Windows installer passed archive, install, HTTP 200, and process cleanup checks."
