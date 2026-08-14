@@ -13,6 +13,10 @@ extraResources:
     to: dsh-runtime/package.json
   - from: bundle/dsh-runtime/node_modules
     to: dsh-runtime/node_modules
+    filter:
+      - "**/*"
+      - "!**/*.map"
+      - "!**/*.d.ts"
 win:
   target:
     - target: nsis
@@ -25,6 +29,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   useZip: true
+  differentialPackage: false
   perMachine: false
   createDesktopShortcut: always
   createStartMenuShortcut: true

@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.0/DeepSeekHarness-Setup-1.0.0.exe"><strong>下载 Windows 安装器</strong></a>
+  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe"><strong>下载 Windows 安装器</strong></a>
   · <a href="#为什么需要桌面版">为什么做</a>
   · <a href="#从源码构建">从源码构建</a>
   · <a href="https://github.com/Links2008/Deepseek-Harness-/issues">问题反馈</a>
@@ -27,7 +27,7 @@
 
 ## 一分钟开始
 
-1. 下载 [`DeepSeekHarness-Setup-1.0.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.0/DeepSeekHarness-Setup-1.0.0.exe)。
+1. 下载 [`DeepSeekHarness-Setup-1.0.1.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe)。
 2. 运行安装向导，选择安装目录和磁盘。
 3. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -59,10 +59,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v1.0.0` |
-| 安装器 | [`DeepSeekHarness-Setup-1.0.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.0/DeepSeekHarness-Setup-1.0.0.exe) |
-| 文件大小 | `269,070,877` 字节（约 `256.61 MiB`） |
-| SHA-256 | `00BAA3CB4E5F09A27C52380278D272EC6C7CD0A49F6DD65429B85231D5480DBA` |
+| 当前版本 | `v1.0.1` |
+| 安装器 | [`DeepSeekHarness-Setup-1.0.1.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe) |
+| 文件大小 | `342,392,255` 字节（约 `326.53 MiB`） |
+| SHA-256 | `ED2916D3881202F4ABB49B6C7688A446F92E4BABE9007CA6B6E9424CE777D467` |
 | 系统要求 | Windows 10/11 x64 |
 
 安装器暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。你可以对照上面的 SHA-256，并审计本仓库中的桌面壳与构建配置。
@@ -70,7 +70,8 @@
 ## 已验证行为
 
 - 安装器可选择安装目录和磁盘。
-- 完整运行时包含 37,850 个文件。
+- 完整运行时包含 20,937 个文件。
+- `v1.0.1` 修复安装载荷的 ZIP/7z 格式错配，避免“Failed to decompress files”。
 - 内置 DeepSeek Harness CLI 版本为 `0.1.0-rc.5`。
 - 安装后 Web 根页面返回 HTTP 200。
 - 后端进程使用安装目录内的 `resources/node/node.exe`。
