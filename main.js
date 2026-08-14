@@ -1,5 +1,5 @@
 // DeepSeek Harness Electron 桌面壳
-const { app, BrowserWindow, WebContentsView, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, screen, Notification } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const fs = require("fs");
@@ -13,6 +13,20 @@ let mainWindow = null;
 let controlsView = null;
 let mainWindowMaximized = false;
 let normalWindowBounds = null;
+let boundsAnimationToken = 0;
+let windowTransitioning = false;
+const recentCompletionKeys = new Map();
+const liveNotifications = new Set();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) app.quit();
+
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+});
 
 function log(msg) {
   try {
@@ -104,8 +118,12 @@ async function injectWindowChrome() {
     html, body, #root, #app, body > div:first-child {
       border-radius: var(--dsh-window-radius) !important;
       overflow: hidden !important;
+      transition: border-radius 160ms cubic-bezier(.23, 1, .32, 1);
     }
-    body { clip-path: inset(0 round var(--dsh-window-radius)); }
+    body {
+      clip-path: inset(0 round var(--dsh-window-radius));
+      transition: clip-path 160ms cubic-bezier(.23, 1, .32, 1);
+    }
     .dsh-drag-region { position: fixed; top: 4px; left: 76px; width: 156px; height: 22px; z-index: 2147483646; -webkit-app-region: drag; }
   `);
   await mainWindow.webContents.executeJavaScript(`
@@ -129,16 +147,69 @@ async function injectWindowChrome() {
   `);
 }
 
+async function injectTaskCompletionBridge() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await mainWindow.webContents.executeJavaScript(`
+    (function () {
+      if (window.__dshTaskCompletionObserver) return;
+      const states = new Map();
+      let scanQueued = false;
+      const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+      const statusOf = (row) => {
+        const label = clean(row.firstElementChild && row.firstElementChild.textContent);
+        if (/^(等待批准|等待回答|计划审核|Waiting for approval|Waiting for answer|Plan review)/i.test(label)) return 'waiting';
+        if (/^(进行中|Running)(?:\\s|$)/i.test(label)) return 'running';
+        if (/^(已完成|Completed)$/i.test(label)) return 'completed';
+        return 'idle';
+      };
+      const titleOf = (row, state) => {
+        const children = Array.from(row.children);
+        const first = clean(children[0] && children[0].textContent);
+        const titleNode = state === 'idle' && first ? children[0] : children[1];
+        return clean(titleNode && titleNode.textContent) || 'DeepSeek Harness';
+      };
+      const scan = () => {
+        scanQueued = false;
+        const counts = new Map();
+        const seen = new Set();
+        document.querySelectorAll('[role="treeitem"]:not(button)').forEach((row) => {
+          const state = statusOf(row);
+          const title = titleOf(row, state);
+          const occurrence = counts.get(title) || 0;
+          counts.set(title, occurrence + 1);
+          const key = title + '::' + occurrence;
+          seen.add(key);
+          const previous = states.get(key);
+          if (previous === 'running' && (state === 'idle' || state === 'completed')) {
+            window.dshWin && window.dshWin.taskComplete({ key, title });
+          }
+          states.set(key, state);
+        });
+        for (const key of states.keys()) if (!seen.has(key)) states.delete(key);
+      };
+      const queueScan = () => {
+        if (scanQueued) return;
+        scanQueued = true;
+        queueMicrotask(scan);
+      };
+      window.__dshTaskCompletionObserver = new MutationObserver(queueScan);
+      window.__dshTaskCompletionObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      scan();
+    })();
+  `);
+}
+
 async function createControlsOverlay() {
   controlsView = new WebContentsView({
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
       preload: path.join(__dirname, "preload.js"),
     },
   });
   controlsView.setBackgroundColor("#00000000");
-  controlsView.setBounds({ x: 26, y: 10, width: 48, height: 12 });
+  controlsView.setBounds({ x: 26, y: 10, width: 42, height: 10 });
   mainWindow.contentView.addChildView(controlsView);
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
@@ -185,6 +256,7 @@ function createWindow() {
     .finally(() => { controlsReady = true; revealWhenReady(); });
   mainWindow.webContents.on("dom-ready", async () => {
     try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
+    try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
     chromeReady = true;
     revealWhenReady();
   });
@@ -192,7 +264,7 @@ function createWindow() {
     renderReady = true;
     revealWhenReady();
   });
-  mainWindow.loadURL(URL).catch((e) => log("load error: " + e.message));
+  mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
   setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       log("window reveal fallback");
@@ -204,37 +276,120 @@ function createWindow() {
     controlsView = null;
     mainWindowMaximized = false;
     normalWindowBounds = null;
+    boundsAnimationToken += 1;
+    windowTransitioning = false;
     if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
     app.quit();
   });
 }
 
-// 窗口控制 IPC
-ipcMain.on("win:min", () => mainWindow && mainWindow.minimize());
-ipcMain.on("win:max", () => {
-  if (!mainWindow) return;
-  if (mainWindowMaximized && normalWindowBounds) {
-    mainWindow.setBounds(normalWindowBounds);
-    mainWindowMaximized = false;
-    updateMaximizedChrome(false);
-    return;
+function animateWindowBounds(targetBounds, duration = 160, reducedMotion = false) {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve();
+  const token = ++boundsAnimationToken;
+  const startBounds = mainWindow.getBounds();
+  if (reducedMotion || duration <= 0) {
+    mainWindow.setBounds(targetBounds);
+    return Promise.resolve();
   }
-  normalWindowBounds = mainWindow.getBounds();
-  const workArea = screen.getDisplayMatching(normalWindowBounds).workArea;
-  mainWindow.setBounds(workArea);
-  mainWindowMaximized = true;
-  updateMaximizedChrome(true);
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (token !== boundsAnimationToken || !mainWindow || mainWindow.isDestroyed()) return resolve();
+      const progress = Math.min(1, (Date.now() - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const frame = {};
+      for (const key of ["x", "y", "width", "height"]) {
+        frame[key] = Math.round(startBounds[key] + (targetBounds[key] - startBounds[key]) * eased);
+      }
+      mainWindow.setBounds(frame);
+      if (progress < 1) setTimeout(tick, 16);
+      else resolve();
+    };
+    tick();
+  });
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function showTaskCompletionNotification(title) {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({
+    title: "DeepSeek Harness",
+    body: title ? `任务已完成：${title}，点击查看结果` : "任务已完成，点击查看结果",
+    icon: path.join(__dirname, "deepseek_whale_hermes_rounded.png"),
+  });
+  liveNotifications.add(notification);
+  notification.on("click", focusMainWindow);
+  notification.on("close", () => liveNotifications.delete(notification));
+  notification.on("failed", (_event, error) => {
+    liveNotifications.delete(notification);
+    log("notification failed: " + error);
+  });
+  notification.show();
+}
+
+// 窗口控制与任务完成 IPC
+ipcMain.on("win:min", () => mainWindow && mainWindow.minimize());
+ipcMain.on("win:max", async (_event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || windowTransitioning) return;
+  windowTransitioning = true;
+  const restoring = mainWindowMaximized && normalWindowBounds;
+  const target = restoring
+    ? normalWindowBounds
+    : screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+  if (!restoring) normalWindowBounds = mainWindow.getBounds();
+  updateMaximizedChrome(!restoring);
+  try {
+    await animateWindowBounds(target, 160, options.reducedMotion === true);
+    mainWindowMaximized = !restoring;
+  } finally {
+    windowTransitioning = false;
+  }
 });
 ipcMain.on("win:close", () => mainWindow && mainWindow.close());
-
-app.whenReady().then(async () => {
-  log("app ready");
-  const ok = await ensureDshBackend();
-  if (!ok) { log("backend failed, quitting"); app.quit(); return; }
-  createWindow();
-  scheduleAutoUpdates();
-  log("window created");
+ipcMain.on("task:complete", (event, details = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  const title = typeof details.title === "string" ? details.title.slice(0, 120) : "";
+  const key = typeof details.key === "string" ? details.key.slice(0, 180) : title;
+  const now = Date.now();
+  for (const [oldKey, timestamp] of recentCompletionKeys) {
+    if (now - timestamp > 30000) recentCompletionKeys.delete(oldKey);
+  }
+  if (!key || recentCompletionKeys.has(key)) return;
+  recentCompletionKeys.set(key, now);
+  log("task completed: " + key);
+  if (mainWindow.isMinimized() || !mainWindow.isFocused()) showTaskCompletionNotification(title);
 });
+
+if (hasSingleInstanceLock) {
+  app.whenReady().then(async () => {
+    if (process.platform === "win32") app.setAppUserModelId("com.links2008.deepseek-harness");
+    log("app ready");
+    createWindow();
+    scheduleAutoUpdates();
+    log("window created");
+    const ok = await ensureDshBackend();
+    if (!ok) {
+      log("backend failed");
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.executeJavaScript(`
+          document.querySelector('[data-status]').textContent = '启动失败，请关闭后重试';
+          document.querySelector('[data-detail]').textContent = 'DeepSeek Harness 后端未能在 150 秒内启动。';
+          document.querySelector('.spinner').hidden = true;
+        `).catch(() => {});
+      }
+      return;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(URL).catch((e) => log("load error: " + e.message));
+    }
+  });
+}
 
 app.on("window-all-closed", () => {
   if (dshProc) { try { dshProc.kill(); } catch (e) {} }

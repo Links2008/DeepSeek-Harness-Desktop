@@ -6,6 +6,8 @@ files:
   - main.js
   - preload.js
   - window-controls.html
+  - loading.html
+  - deepseek_whale_hermes_rounded.png
   - package.json
 extraResources:
   - from: bundle/node/node.exe
