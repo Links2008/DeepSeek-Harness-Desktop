@@ -1,0 +1,34 @@
+appId: com.deepseek.dsh
+productName: DeepSeekHarness
+directories:
+  output: installer-dist
+files:
+  - main.js
+  - preload.js
+  - package.json
+extraResources:
+  - from: bundle/node/node.exe
+    to: node/node.exe
+  - from: bundle/dsh-runtime/package.json
+    to: dsh-runtime/package.json
+  - from: bundle/dsh-runtime/node_modules
+    to: dsh-runtime/node_modules
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: deepseek_whale_hermes_rounded.ico
+electronVersion: 43.4.0
+artifactName: DeepSeekHarness-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  useZip: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: DeepSeek Harness
+  installerIcon: deepseek_whale_hermes_rounded.ico
+  uninstallerIcon: deepseek_whale_hermes_rounded.ico
+  deleteAppDataOnUninstall: false

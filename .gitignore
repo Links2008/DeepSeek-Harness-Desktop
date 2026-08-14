@@ -1,0 +1,9 @@
+node_modules/
+bundle/
+dist/
+installer-dist*/
+work/
+*.log
+*.blockmap
+.DS_Store
+Thumbs.db
