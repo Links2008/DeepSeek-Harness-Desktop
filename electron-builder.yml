@@ -4,6 +4,7 @@ directories:
   output: installer-dist
 files:
   - main.js
+  - desktop-behavior.js
   - preload.js
   - window-controls.html
   - loading.html

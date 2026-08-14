@@ -1,6 +1,19 @@
 name: Follow DeepSeek Harness upstream
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/upstream-sync.yml"
+      - "main.js"
+      - "desktop-behavior.js"
+      - "preload.js"
+      - "window-controls.html"
+      - "loading.html"
+      - "electron-builder.yml"
+      - "deepseek_whale_hermes_rounded.*"
+      - "scripts/**"
+      - "tests/**"
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
@@ -28,6 +41,13 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
 
       - name: Check out DeepSeek Harness
         uses: actions/checkout@v7
@@ -36,33 +56,66 @@ jobs:
           ref: master
           path: upstream
 
-      - name: Detect an upstream change
-        id: upstream
+      - name: Inspect upstream and release state
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
           $sha = git -C upstream rev-parse HEAD
           $manifest = Get-Content upstream/package.json -Raw | ConvertFrom-Json
-          $changed = ($sha -ne $lock.commit) -or ('${{ inputs.force }}' -eq 'true')
+          $desktop = Get-Content package.json -Raw | ConvertFrom-Json
+          $tag = "v$($desktop.version)"
+          $releases = @(gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect GitHub Releases' }
+          $existing = $releases | Where-Object tag_name -eq $tag | Select-Object -First 1
+          $installerName = "DeepSeekHarness-Setup-$($desktop.version).exe"
+          $installerAssets = @($existing.assets | Where-Object name -eq $installerName)
+          $metadataAssets = @($existing.assets | Where-Object name -eq 'latest.yml')
+          $assetsReady = $null -ne $existing -and !$existing.draft -and
+            $installerAssets.Count -eq 1 -and $installerAssets[0].size -gt 0 -and
+            $metadataAssets.Count -eq 1 -and $metadataAssets[0].size -gt 0
+          $releaseReady = $false
+          if ($assetsReady) {
+            $inspectRoot = Join-Path $env:RUNNER_TEMP "release-inspect-$($desktop.version)"
+            New-Item -ItemType Directory -Path $inspectRoot -Force | Out-Null
+            gh release download $tag --repo '${{ github.repository }}' --pattern latest.yml --dir $inspectRoot
+            if ($LASTEXITCODE -ne 0) { throw "Could not download metadata for $tag" }
+            $publishedMetadata = Get-Content (Join-Path $inspectRoot 'latest.yml') -Raw
+            $releaseReady = $publishedMetadata -match "(?m)^version:\s*$([regex]::Escape($desktop.version))\s*$" -and
+              $publishedMetadata -match "(?m)^\s+- url:\s*$([regex]::Escape($installerName))\s*$" -and
+              $publishedMetadata -match '(?m)^\s+sha512:\s*\S+\s*$'
+          }
+          if ($null -ne $existing -and !$existing.draft -and !$releaseReady) {
+            throw "Published release $tag is incomplete; refusing to mutate a live update"
+          }
+          $head = git rev-parse HEAD
+          $policy = @{
+            currentReleaseReady = [bool]$releaseReady
+            upstreamChanged = $sha -ne $lock.commit
+            desktopPush = '${{ github.event_name }}' -eq 'push' -and $head -eq '${{ github.sha }}'
+            force = '${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.force }}' -eq 'true'
+          } | ConvertTo-Json -Compress
+          $decision = node scripts/release-policy.cjs $policy
+          if ($LASTEXITCODE -ne 0) { throw 'Release policy failed' }
+          $decision | ForEach-Object { $_ >> $env:GITHUB_OUTPUT }
           "sha=$sha" >> $env:GITHUB_OUTPUT
-          "version=$($manifest.version)" >> $env:GITHUB_OUTPUT
-          "changed=$($changed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "upstream_version=$($manifest.version)" >> $env:GITHUB_OUTPUT
+          "current_desktop_version=$($desktop.version)" >> $env:GITHUB_OUTPUT
 
       - name: Stop when already current
-        if: steps.upstream.outputs.changed != 'true'
-        run: Write-Host "Desktop runtime already follows ${{ steps.upstream.outputs.sha }}"
-
-      - name: Set up Node.js
-        if: steps.upstream.outputs.changed == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
+        if: steps.release.outputs.should_build != 'true'
+        run: Write-Host "No release work required (${{ steps.release.outputs.reason }})"
 
       - name: Build upstream release families
-        if: steps.upstream.outputs.changed == 'true'
+        if: steps.release.outputs.should_build == 'true'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           corepack enable
           corepack prepare pnpm@11.7.0 --activate
           Push-Location upstream
@@ -73,9 +126,11 @@ jobs:
           Pop-Location
 
       - name: Assemble the independent Windows runtime
-        if: steps.upstream.outputs.changed == 'true'
+        if: steps.release.outputs.should_build == 'true'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           node scripts/create-runtime-manifest.mjs bundle/dsh-runtime packed-vendor packed-dsh
           Push-Location bundle/dsh-runtime
           npm install --no-audit --no-fund --package-lock=false --include=optional
@@ -87,68 +142,175 @@ jobs:
           Copy-Item (Get-Command node.exe).Source bundle/node/node.exe
 
       - name: Build and test the desktop release
-        if: steps.upstream.outputs.changed == 'true'
+        if: steps.release.outputs.should_build == 'true'
         id: desktop
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           npm ci --no-audit --no-fund
-          npm version patch --no-git-tag-version
+          if ('${{ steps.release.outputs.bump }}' -eq 'true') {
+            npm version patch --no-git-tag-version
+          } else {
+            Write-Host "Repairing desktop v${{ steps.release.outputs.current_desktop_version }} without another version bump"
+          }
           $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
-          $lock.commit = '${{ steps.upstream.outputs.sha }}'
-          $lock.version = '${{ steps.upstream.outputs.version }}'
+          $lock.commit = '${{ steps.release.outputs.sha }}'
+          $lock.version = '${{ steps.release.outputs.upstream_version }}'
           $lock | ConvertTo-Json | Set-Content upstream-lock.json -Encoding utf8NoBOM
           npm test
           npm run build:installer
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $latestPath = 'installer-dist/latest.yml'
+          $appUpdatePath = 'installer-dist/win-unpacked/resources/app-update.yml'
+          if (!(Test-Path $latestPath)) { throw 'latest.yml is missing from the release build' }
+          if (!(Test-Path $appUpdatePath)) { throw 'resources/app-update.yml is missing from the packaged app' }
+          $latest = Get-Content $latestPath -Raw
+          if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
+            throw "latest.yml does not describe desktop version $version"
+          }
+          $installerPath = "installer-dist/DeepSeekHarness-Setup-$version.exe"
+          $expectedSha512 = [regex]::Match($latest, '(?m)^\s+sha512:\s*(\S+)\s*$').Groups[1].Value
+          if (!$expectedSha512) { throw 'latest.yml does not contain files[].sha512' }
+          $stream = [IO.File]::OpenRead($installerPath)
+          $hasher = [Security.Cryptography.SHA512]::Create()
+          try {
+            $actualSha512 = [Convert]::ToBase64String($hasher.ComputeHash($stream))
+          } finally {
+            $hasher.Dispose()
+            $stream.Dispose()
+          }
+          if ($actualSha512 -ne $expectedSha512) { throw 'Installer SHA-512 does not match latest.yml' }
+          $appUpdate = Get-Content $appUpdatePath -Raw
+          if ($appUpdate -notmatch '(?m)^owner:\s*Links2008\s*$' -or
+              $appUpdate -notmatch '(?m)^repo:\s*Deepseek-Harness-\s*$') {
+            throw 'app-update.yml does not point to the public desktop release feed'
+          }
+          $followed = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
+          if ($followed.commit -ne '${{ steps.release.outputs.sha }}' -or
+              $followed.version -ne '${{ steps.release.outputs.upstream_version }}') {
+            throw 'upstream-lock.json does not match the runtime included in this release'
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "installer=installer-dist/DeepSeekHarness-Setup-$version.exe" >> $env:GITHUB_OUTPUT
+          "installer_bytes=$((Get-Item $installerPath).Length)" >> $env:GITHUB_OUTPUT
+          "installer_sha256=$((Get-FileHash $installerPath -Algorithm SHA256).Hash)" >> $env:GITHUB_OUTPUT
 
       - name: Verify archive and installed runtime
-        if: steps.upstream.outputs.changed == 'true'
+        if: steps.release.outputs.should_build == 'true'
         shell: pwsh
         run: |
-          & 'C:\Program Files\7-Zip\7z.exe' t '${{ steps.desktop.outputs.installer }}'
-          $installer = Resolve-Path '${{ steps.desktop.outputs.installer }}'
-          $process = Start-Process $installer -ArgumentList '/S' -PassThru
-          $process.WaitForExit()
-          if ($process.ExitCode -ne 0) { throw "Installer failed with $($process.ExitCode)" }
-          $app = "$env:LOCALAPPDATA\Programs\DeepSeekHarness\DeepSeekHarness.exe"
-          if (!(Test-Path $app)) { throw 'Installed executable is missing' }
-          Start-Process $app
-          $ready = $false
-          for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            Start-Sleep -Seconds 2
-            try {
-              if ((Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) {
-                $ready = $true
-                break
-              }
-            } catch {}
-          }
-          if (!$ready) { throw 'HTTP 200 health check failed' }
-          Get-CimInstance Win32_Process | Where-Object ExecutablePath -Like "$env:LOCALAPPDATA\Programs\DeepSeekHarness\*" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+          .\scripts\verify-installed-runtime.ps1 `
+            -Installer '${{ steps.desktop.outputs.installer }}' `
+            -ExpectedVersion '${{ steps.desktop.outputs.version }}' `
+            -ExpectedRuntimeVersion '${{ steps.release.outputs.upstream_version }}'
 
       - name: Attest the installer
-        if: steps.upstream.outputs.changed == 'true'
+        if: steps.release.outputs.should_build == 'true'
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ steps.desktop.outputs.installer }}
 
-      - name: Commit the followed upstream version
-        if: steps.upstream.outputs.changed == 'true'
+      - name: Commit the tested release state
+        if: steps.release.outputs.should_build == 'true'
+        id: state
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           git config user.name github-actions[bot]
+          if ($LASTEXITCODE -ne 0) { throw 'Could not configure Git author name' }
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if ($LASTEXITCODE -ne 0) { throw 'Could not configure Git author email' }
           git add package.json package-lock.json upstream-lock.json
-          git commit -m "Follow DeepSeek Harness ${{ steps.upstream.outputs.version }}"
-          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { throw 'Could not stage release state' }
+          git diff --cached --quiet
+          $diffExitCode = $LASTEXITCODE
+          if ($diffExitCode -notin @(0, 1)) { throw "git diff failed with $diffExitCode" }
+          if ($diffExitCode -eq 1) {
+            git commit -m "Prepare desktop v${{ steps.desktop.outputs.version }} (${{ steps.release.outputs.reason }})"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not commit release state' }
+            git push origin HEAD:main
+            if ($LASTEXITCODE -ne 0) { throw 'Could not push release state' }
+          } else {
+            Write-Host 'Release repair does not require another state commit'
+          }
+          $releaseCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not resolve release commit' }
+          "commit=$releaseCommit" >> $env:GITHUB_OUTPUT
 
-      - name: Publish the tested update
-        if: steps.upstream.outputs.changed == 'true'
+      - name: Prepare and publish the verified update
+        if: steps.release.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $version = '${{ steps.desktop.outputs.version }}'
-          gh release create "v$version" '${{ steps.desktop.outputs.installer }}' installer-dist/latest.yml --repo '${{ github.repository }}' --target main --title "DeepSeek Harness Desktop v$version" --notes "Automatically follows DeepSeek Harness ${{ steps.upstream.outputs.version }} at ${{ steps.upstream.outputs.sha }}. The Windows installer passed archive, install, HTTP 200, and process cleanup checks."
+          $tag = "v$version"
+          $repo = '${{ github.repository }}'
+          $targetCommit = '${{ steps.state.outputs.commit }}'
+          $assets = @(
+            [pscustomobject]@{
+              Path = (Resolve-Path '${{ steps.desktop.outputs.installer }}').Path
+              Name = [IO.Path]::GetFileName('${{ steps.desktop.outputs.installer }}')
+              Size = (Get-Item '${{ steps.desktop.outputs.installer }}').Length
+            },
+            [pscustomobject]@{
+              Path = (Resolve-Path 'installer-dist/latest.yml').Path
+              Name = 'latest.yml'
+              Size = (Get-Item 'installer-dist/latest.yml').Length
+            }
+          )
+          function Get-TargetRelease {
+            $all = @(gh api "repos/$repo/releases?per_page=100" | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect release state' }
+            return $all | Where-Object tag_name -eq $tag | Select-Object -First 1
+          }
+
+          $release = Get-TargetRelease
+          if ($null -ne $release -and !$release.draft) {
+            throw "Refusing to replace already-published release $tag"
+          }
+          $notes = "Reason: ${{ steps.release.outputs.reason }}. Includes DeepSeek Harness ${{ steps.release.outputs.upstream_version }} at ${{ steps.release.outputs.sha }}. Installer bytes: ${{ steps.desktop.outputs.installer_bytes }}. SHA-256: ${{ steps.desktop.outputs.installer_sha256 }}. Passed tests, archive and SHA-512 checks, isolated install, AppID, HTTP 200, runtime-version, cleanup, and uninstall checks."
+          if ($null -eq $release) {
+            gh release create $tag --repo $repo --target $targetCommit --title "DeepSeek Harness Desktop $tag" --notes $notes --draft
+            if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $tag" }
+          }
+
+          $release = Get-TargetRelease
+          if ($null -eq $release -or !$release.draft) { throw "$tag is not a repairable draft" }
+          foreach ($asset in $assets) {
+            $matches = @($release.assets | Where-Object name -eq $asset.Name)
+            if ($matches.Count -eq 1 -and $matches[0].size -eq $asset.Size) {
+              Write-Host "Keeping verified draft asset $($asset.Name)"
+              continue
+            }
+            if ($matches.Count -gt 0) {
+              gh release upload $tag $asset.Path --repo $repo --clobber
+            } else {
+              gh release upload $tag $asset.Path --repo $repo
+            }
+            if ($LASTEXITCODE -ne 0) { throw "Could not upload $($asset.Name)" }
+            $release = Get-TargetRelease
+          }
+
+          $release = Get-TargetRelease
+          if (!$release.draft) { throw 'Release became public before verification completed' }
+          foreach ($asset in $assets) {
+            $matches = @($release.assets | Where-Object name -eq $asset.Name)
+            if ($matches.Count -ne 1 -or $matches[0].size -ne $asset.Size -or $matches[0].state -ne 'uploaded') {
+              throw "Draft asset verification failed for $($asset.Name)"
+            }
+          }
+
+          gh release edit $tag --repo $repo --target $targetCommit --title "DeepSeek Harness Desktop $tag" --notes $notes --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish $tag" }
+          $published = gh release view $tag --repo $repo --json isDraft,assets | ConvertFrom-Json
+          if ($published.isDraft) { throw "$tag remained a draft" }
+          foreach ($asset in $assets) {
+            $matches = @($published.assets | Where-Object name -eq $asset.Name)
+            if ($matches.Count -ne 1 -or $matches[0].size -ne $asset.Size) {
+              throw "Published asset verification failed for $($asset.Name)"
+            }
+          }

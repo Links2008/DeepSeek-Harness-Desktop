@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe"><strong>下载 Windows 安装器</strong></a>
+  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/latest"><strong>下载最新版 Windows 安装器</strong></a>
   · <a href="#为什么需要桌面版">为什么做</a>
   · <a href="#从源码构建">从源码构建</a>
   · <a href="https://github.com/Links2008/Deepseek-Harness-/issues">问题反馈</a>
@@ -27,7 +27,7 @@
 
 ## 一分钟开始
 
-1. 下载 [`DeepSeekHarness-Setup-1.1.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe)。
+1. 打开 [Latest Release](https://github.com/Links2008/Deepseek-Harness-/releases/latest)，下载 `DeepSeekHarness-Setup-<版本>.exe`。
 2. 运行安装向导，选择安装目录和磁盘。
 3. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -40,7 +40,7 @@
 | 需要准备 Node.js、pnpm、源码和依赖 | 安装器内置独立 Node.js 与完整运行时 |
 | 启动依赖命令行和固定工作目录 | 提供桌面与开始菜单快捷方式 |
 | Web 页面缺少桌面窗口控制 | 左上角独立原生三色控件，不受设置页模糊影响 |
-| 任务结束后需要反复切回窗口查看 | 后台或最小化时发送 Windows 完成通知，点击即可回到结果 |
+| 任务结束后需要反复切回窗口查看 | 每次任务完成均发送 Windows 系统通知，点击即可回到结果 |
 | 图标、任务栏和快捷方式不统一 | 使用统一的圆角鲸鱼图标 |
 | 安装路径固定或安装过程缓慢 | 向导式 NSIS 安装器，可选磁盘并使用 ZIP 载荷 |
 | 担心配置或会话被打进安装包 | 不打包用户的 `~/.dsh`、凭据、Cookie 或会话 |
@@ -52,25 +52,49 @@
 - 自动启动 Web 后端，关闭窗口时同步清理后端进程与端口。
 - 无边框圆角窗口，支持最小化、最大化、还原和退出。
 - 首个可见帧前完成圆角处理，设置页切换不再出现方角闪烁。
-- 10px 红黄绿窗口控件使用独立原生覆盖层，带 120ms 可见按压反馈。
-- 最大化/还原时保存正确的窗口边界，并使用 160ms 缓动过渡。
-- 后台任务由“运行中 → 完成/空闲”的真实状态边沿触发 Windows 通知，等待审批或回答不会误报。
+- 10px 红黄绿窗口控件使用独立原生覆盖层和 16px 命中区；`pointerdown` 即时按压，释放后清晰回弹。
+- 最大化/还原交给 Electron 原生 `maximize()/unmaximize()` 和 Windows DWM，避免逐帧改窗口边界造成卡顿。
+- 任务由“运行中 → 完成/空闲”的真实状态边沿触发 Windows 通知；每个完成事件都通知，等待审批或回答不会误报，同一事件在 30 秒内去重。
 - 单实例启动：重复点击快捷方式会恢复并聚焦现有窗口，不会重复启动后端。
 - 冷启动先显示本地启动页，自动更新检查不再被后端初始化阻塞。
-- 后台检查 GitHub Releases，下载完成后在退出应用时自动安装更新。
-- GitHub Actions 每天检查 DeepSeek Harness 上游，构建通过安装、HTTP 200 和进程清理验收后才发布。
+- 启动 30 秒后检查 GitHub Releases，之后每 6 小时重试；下载完成后在退出应用时自动安装更新。
+- GitHub Actions 在桌面壳关键代码推送时立即运行，并于每天北京时间 10:17 检查 DeepSeek Harness 上游；只有新变化、人工 force 或残缺草稿修复才构建完整安装包。
 - 自动创建桌面快捷方式、开始菜单入口和卸载项。
 - 安装时可选择目录和磁盘。
 - 保留当前 Windows 用户已有的 `~/.dsh` 配置与会话。
+
+## 自动推包与客户端更新链路
+
+1. **触发**：桌面壳关键文件推送到 `main` 时立即运行；每天 10:17（北京时间）检查一次 Harness 上游；也可以人工 `workflow_dispatch` force 验收。
+2. **发布决策**：先检查当前桌面版本的 GitHub Release、两个必要资产和远端 `latest.yml`。完整且无新变化就停止，不消耗构建时间。
+3. **版本状态机**：上游变化、桌面壳变化或 force 才递增补丁版本；若版本提交后发布中断，下次运行修复同一版本，不会连续跳号。
+4. **构建**：固定 Node.js 与 pnpm 版本，构建上游 `vendor`/`dsh` release families，再生成独立 Windows 运行时和 NSIS 安装器。
+5. **产物门禁**：校验 `latest.yml` 版本与文件名、安装器 SHA-512、`app-update.yml` 更新源以及 `upstream-lock.json`。
+6. **隔离安装验收**：把候选版静默安装到 GitHub runner 临时目录，验证 FileVersion、开始菜单 AppID、内置 Harness 版本和 HTTP 200；随后清理进程、确认 3080 端口释放并静默卸载。
+7. **提交状态**：只有前面全部通过，机器人才能提交 `package.json`、`package-lock.json` 与 `upstream-lock.json`。该提交使用 `GITHUB_TOKEN`，不会递归触发本工作流。
+8. **草稿发布**：Release 先保持 draft；只补传缺失或不匹配的资产。安装器和 `latest.yml` 的远端名称、状态与字节数全部通过后，才切换为公开 Latest Release。
+9. **客户端升级**：已安装客户端启动 30 秒后检查，以后每 6 小时重试；下载成功后等待用户退出应用再安装，不会在运行中强行替换文件。
+
+失败恢复遵循 fail-closed：
+
+| 失败位置 | 结果与恢复方式 |
+| --- | --- |
+| 上游构建、测试或打包失败 | 不提交版本、不创建 Release；修复后重跑 |
+| 安装验收或卸载失败 | 不发布；`finally` 仍清理进程并检查 3080 端口 |
+| 版本状态已提交但上传中断 | 保留同版本 draft；下次定时、重跑或 dispatch 原地续传 |
+| 公开 Release 被发现缺资产或元数据损坏 | 停止并报错，不自动覆盖正在服务客户端的公开版本 |
+| 客户端检查或下载失败 | 保留当前可用版本；下次启动或 6 小时周期自动重试 |
+
+这套 Actions 只运行 Git、Node.js、pnpm、electron-builder、7-Zip、NSIS 和 GitHub CLI，不调用 OpenAI/Codex API，因此自动检查、构建和推包不会消耗 GPT/Codex 额度。只有人工让 Codex 排查或修改代码时才会使用 Codex 额度。
 
 ## 下载与校验
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v1.1.0` |
-| 安装器 | [`DeepSeekHarness-Setup-1.1.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe) |
-| 文件大小 | `342,939,120` 字节（约 `327.05 MiB`） |
-| SHA-256 | `C24B63A01036F910FFA7BDA7A84B0D666B4E4DAF5962FC6DDAA1E1BB46912E40` |
+| 最新版本 | [GitHub Latest Release](https://github.com/Links2008/Deepseek-Harness-/releases/latest) |
+| 安装器 | `DeepSeekHarness-Setup-<版本>.exe` |
+| SHA-256 | 每个 Release 的说明由机器人写入安装器字节数和 SHA-256 |
+| 更新校验 | `latest.yml` 的 SHA-512、GitHub 构建来源证明和本仓库 CI 验收 |
 | 系统要求 | Windows 10/11 x64 |
 
 安装器暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。你可以对照上面的 SHA-256，并审计本仓库中的桌面壳与构建配置。
@@ -82,6 +106,8 @@
 - `v1.0.1` 修复安装载荷的 ZIP/7z 格式错配，避免“Failed to decompress files”。
 - `v1.1.0` 修复首次显示与设置页切换的圆角闪烁，三色控件在设置模糊层上保持清晰。
 - `v1.1.0` 加入三色控件点击反馈、最大化/还原缓动、单实例保护、冷启动页和后台任务完成通知。
+- 下一版本候选已把三控件改为按下即反馈、释放回弹与原生最大化/还原；16px 命中区保留 10px 视觉圆点。
+- Windows 实机连续两次记录到 `task completed → notification attempted → notification shown → notification closed`，且没有 `notification failed`；通知卡片截图与点击回到结果仍需单独做视觉验收。
 - 自动更新元数据 `latest.yml` 和安装目录内的 `app-update.yml` 已生成并验证。
 - 内置 DeepSeek Harness CLI 版本为 `0.1.0-rc.5`。
 - 安装后 Web 根页面返回 HTTP 200。
@@ -138,6 +164,7 @@ npm run build:installer
 ```text
 .
 ├─ main.js                         Electron 主进程与窗口控制
+├─ desktop-behavior.js             可独立测试的通知、标题与窗口行为规则
 ├─ preload.js                      安全的窗口控制 IPC 桥
 ├─ window-controls.html            独立原生三色窗口控件
 ├─ electron-builder.yml            NSIS、图标和运行时打包配置
@@ -146,8 +173,15 @@ npm run build:installer
 ├─ .github/workflows/
 │  └─ upstream-sync.yml             上游检测、构建、验收和发布
 ├─ scripts/
-│  └─ create-runtime-manifest.mjs  生成独立运行时清单
+│  ├─ create-runtime-manifest.mjs  生成独立运行时清单
+│  ├─ release-policy.cjs           可测试的发布/修复版本状态机
+│  └─ verify-installed-runtime.ps1 隔离安装、运行、清理和卸载验收
 ├─ tests/
+│  ├─ desktop_behavior.test.js     通知策略、AppID 与窗口命令行为测试
+│  ├─ release_policy.test.js       发布决策与失败续跑测试
+│  ├─ update_pipeline_behavior.test.js 自动发布验收规则测试
+│  ├─ workflow_powershell_syntax.test.js 工作流内嵌脚本语法测试
+│  ├─ window_controls_behavior.test.js 三控件按压/回弹行为测试
 │  ├─ installer_runtime.test.js    安装器配置回归测试
 │  └─ window_chrome_update.test.js 窗口与自动更新回归测试
 └─ deepseek_whale_hermes_rounded.* 应用图标
@@ -173,6 +207,7 @@ npm run build:installer
 - 电脑已安装 Harness 时不会被覆盖：3080 上已有 Harness 会被复用；未运行时桌面版使用自己的内置运行时。用户自行启动的 Harness 也不会在关闭桌面窗口时被结束。
 - 首次启动需要生成 Web profile，部分电脑可能需要约 30–70 秒。
 - `v1.0.1` 本身没有更新客户端，需要手动安装一次 `v1.1.0`；之后的桌面版本可自动更新。
+- 自动更新失败不会替换当前安装；应用继续使用现有版本，并在下次启动或 6 小时周期到达时重试。可在 `%APPDATA%\dsh-desktop\dsh_desktop.log` 查看当前/远端版本、下载进度、缓存文件、安装时机和错误类别。
 - 已安装旧版时，NSIS 会按更新处理并沿用原安装目录；如需更换磁盘，请先卸载旧版。
 - 当前安装器没有商业代码签名，SmartScreen 提示不代表文件校验失败。
 

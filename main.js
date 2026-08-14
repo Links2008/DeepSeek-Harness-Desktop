@@ -1,10 +1,16 @@
 // DeepSeek Harness Electron 桌面壳
-const { app, BrowserWindow, WebContentsView, ipcMain, screen, Notification } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, Notification } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const {
+  APP_ID,
+  nextMaximizeCommand,
+  sanitizeTaskTitle,
+  shouldNotifyTaskCompletion,
+} = require("./desktop-behavior");
 
 const DEV_DSH_DIR = "D:\\deepseek-harness";
 const URL = "http://127.0.0.1:3080";
@@ -12,10 +18,6 @@ const WIN_RADIUS = 30; // 窗口四角圆角(2026-08-14 用户最终确认:30px)
 let dshProc = null;
 let mainWindow = null;
 let controlsView = null;
-let mainWindowMaximized = false;
-let normalWindowBounds = null;
-let boundsAnimationToken = 0;
-let windowTransitioning = false;
 const recentCompletionKeys = new Map();
 const liveNotifications = new Set();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -48,12 +50,23 @@ function scheduleAutoUpdates() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
-  autoUpdater.on("checking-for-update", () => log("checking for update"));
+  let progressBucket = -1;
+  autoUpdater.on("checking-for-update", () => log("checking for update: current=" + app.getVersion()));
   autoUpdater.on("update-available", (info) => log("update available: " + info.version));
-  autoUpdater.on("update-not-available", () => log("update not available"));
-  autoUpdater.on("update-downloaded", (info) => log("update ready for next quit: " + info.version));
-  autoUpdater.on("error", (e) => log("update error: " + e.message));
-  const checkForUpdates = () => autoUpdater.checkForUpdates().catch((e) => log("update check failed: " + e.message));
+  autoUpdater.on("update-not-available", (info) => log("update not available: remote=" + info.version));
+  autoUpdater.on("download-progress", (info) => {
+    const bucket = Math.floor(info.percent / 10) * 10;
+    if (bucket === progressBucket) return;
+    progressBucket = bucket;
+    log("update download progress: " + bucket + "%");
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    log("update ready for next quit: " + info.version + " file=" + info.downloadedFile);
+  });
+  autoUpdater.on("error", (e) => log("update error [" + (e.code || e.name || "Error") + "]: " + e.message));
+  const checkForUpdates = () => autoUpdater.checkForUpdates().catch((e) => {
+    log("update check failed [" + (e.code || e.name || "Error") + "]: " + e.message);
+  });
   const firstCheck = setTimeout(checkForUpdates, 30000);
   const recurringCheck = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
   firstCheck.unref();
@@ -240,7 +253,7 @@ async function createControlsOverlay() {
     },
   });
   controlsView.setBackgroundColor("#00000000");
-  controlsView.setBounds({ x: 26, y: 10, width: 42, height: 10 });
+  controlsView.setBounds({ x: 23, y: 6, width: 48, height: 18 });
   mainWindow.contentView.addChildView(controlsView);
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
@@ -295,6 +308,8 @@ function createWindow() {
     renderReady = true;
     revealWhenReady();
   });
+  mainWindow.on("maximize", () => updateMaximizedChrome(true));
+  mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
   mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
   setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
@@ -305,38 +320,8 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
     controlsView = null;
-    mainWindowMaximized = false;
-    normalWindowBounds = null;
-    boundsAnimationToken += 1;
-    windowTransitioning = false;
     if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
     app.quit();
-  });
-}
-
-function animateWindowBounds(targetBounds, duration = 160, reducedMotion = false) {
-  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve();
-  const token = ++boundsAnimationToken;
-  const startBounds = mainWindow.getBounds();
-  if (reducedMotion || duration <= 0) {
-    mainWindow.setBounds(targetBounds);
-    return Promise.resolve();
-  }
-  const startedAt = Date.now();
-  return new Promise((resolve) => {
-    const tick = () => {
-      if (token !== boundsAnimationToken || !mainWindow || mainWindow.isDestroyed()) return resolve();
-      const progress = Math.min(1, (Date.now() - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const frame = {};
-      for (const key of ["x", "y", "width", "height"]) {
-        frame[key] = Math.round(startBounds[key] + (targetBounds[key] - startBounds[key]) * eased);
-      }
-      mainWindow.setBounds(frame);
-      if (progress < 1) setTimeout(tick, 16);
-      else resolve();
-    };
-    tick();
   });
 }
 
@@ -348,15 +333,27 @@ function focusMainWindow() {
 }
 
 function showTaskCompletionNotification(title) {
-  if (!Notification.isSupported()) return;
+  if (!Notification.isSupported()) {
+    log("notification skipped: unsupported");
+    return;
+  }
+  const safeTitle = sanitizeTaskTitle(title);
+  log("notification attempted");
   const notification = new Notification({
     title: "DeepSeek Harness",
-    body: title ? `任务已完成：${title}，点击查看结果` : "任务已完成，点击查看结果",
+    body: safeTitle ? `任务已完成：${safeTitle}，点击查看结果` : "任务已完成，点击查看结果",
     icon: path.join(__dirname, "deepseek_whale_hermes_rounded.png"),
   });
   liveNotifications.add(notification);
-  notification.on("click", focusMainWindow);
-  notification.on("close", () => liveNotifications.delete(notification));
+  notification.on("show", () => log("notification shown"));
+  notification.on("click", () => {
+    log("notification clicked");
+    focusMainWindow();
+  });
+  notification.on("close", () => {
+    liveNotifications.delete(notification);
+    log("notification closed");
+  });
   notification.on("failed", (_event, error) => {
     liveNotifications.delete(notification);
     log("notification failed: " + error);
@@ -366,26 +363,16 @@ function showTaskCompletionNotification(title) {
 
 // 窗口控制与任务完成 IPC
 ipcMain.on("win:min", () => mainWindow && mainWindow.minimize());
-ipcMain.on("win:max", async (_event, options = {}) => {
-  if (!mainWindow || mainWindow.isDestroyed() || windowTransitioning) return;
-  windowTransitioning = true;
-  const restoring = mainWindowMaximized && normalWindowBounds;
-  const target = restoring
-    ? normalWindowBounds
-    : screen.getDisplayMatching(mainWindow.getBounds()).workArea;
-  if (!restoring) normalWindowBounds = mainWindow.getBounds();
-  updateMaximizedChrome(!restoring);
-  try {
-    await animateWindowBounds(target, 160, options.reducedMotion === true);
-    mainWindowMaximized = !restoring;
-  } finally {
-    windowTransitioning = false;
-  }
+ipcMain.on("win:max", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const command = nextMaximizeCommand(mainWindow.isMaximized());
+  updateMaximizedChrome(command === "maximize");
+  mainWindow[command]();
 });
 ipcMain.on("win:close", () => mainWindow && mainWindow.close());
 ipcMain.on("task:complete", (event, details = {}) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
-  const title = typeof details.title === "string" ? details.title.slice(0, 120) : "";
+  const title = sanitizeTaskTitle(details.title);
   const key = typeof details.key === "string" ? details.key.slice(0, 180) : title;
   const now = Date.now();
   for (const [oldKey, timestamp] of recentCompletionKeys) {
@@ -393,13 +380,17 @@ ipcMain.on("task:complete", (event, details = {}) => {
   }
   if (!key || recentCompletionKeys.has(key)) return;
   recentCompletionKeys.set(key, now);
-  log("task completed: " + key);
-  if (mainWindow.isMinimized() || !mainWindow.isFocused()) showTaskCompletionNotification(title);
+  log("task completed");
+  if (shouldNotifyTaskCompletion({
+    focused: mainWindow.isFocused(),
+    minimized: mainWindow.isMinimized(),
+  })) showTaskCompletionNotification(title);
+  else log("notification skipped: policy");
 });
 
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
-    if (process.platform === "win32") app.setAppUserModelId("com.links2008.deepseek-harness");
+    if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     log("app ready");
     createWindow();
     scheduleAutoUpdates();

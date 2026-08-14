@@ -7,27 +7,62 @@
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
     body { display: flex; }
-    .controls { display: flex; gap: 6px; }
+    .controls { display: flex; gap: 0; }
     button {
-      width: 10px; height: 10px; padding: 0; border: 0; border-radius: 50%;
-      display: grid; place-items: center; color: rgba(25,25,25,.72); cursor: pointer;
+      width: 16px; height: 18px; padding: 0; border: 0; border-radius: 9px;
+      position: relative; display: grid; place-items: center; background: transparent;
+      color: rgba(25,25,25,.76); cursor: pointer; touch-action: none;
       font: 700 7px/1 "Segoe UI Symbol", sans-serif;
-      transition: transform 140ms var(--ease-out), filter 140ms ease;
     }
-    [data-action="close"] { background: #ff5f57; }
-    [data-action="min"] { background: #febc2e; }
-    [data-action="max"] { background: #28c840; }
-    .glyph { opacity: 0; transform: scale(.9); transition: opacity 120ms ease, transform 140ms var(--ease-out); }
-    button:active, button.activating { transform: scale(.84); filter: brightness(.9); }
-    button:focus-visible { outline: 1px solid rgba(255,255,255,.82); outline-offset: -2px; }
+    button::before, button::after {
+      content: ""; position: absolute; left: 50%; top: 50%; border-radius: 50%;
+      pointer-events: none; transform: translate(-50%, -50%);
+    }
+    button::before {
+      width: 10px; height: 10px; background: var(--dot-color);
+      box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 0 0 1px rgba(0,0,0,.08);
+      transition: transform 82ms cubic-bezier(.2,.8,.2,1), filter 82ms ease, box-shadow 82ms ease;
+    }
+    button::after {
+      width: 14px; height: 14px; background: var(--dot-color); opacity: 0;
+      transition: opacity 82ms ease, transform 82ms ease;
+    }
+    [data-action="close"] { --dot-color: #ff5f57; }
+    [data-action="min"] { --dot-color: #febc2e; }
+    [data-action="max"] { --dot-color: #28c840; }
+    .glyph {
+      position: absolute; z-index: 2; left: 50%; top: 50%; opacity: 0;
+      transform: translate(-50%, -50%) scale(.88);
+      transition: opacity 120ms ease, transform 160ms var(--ease-out);
+    }
+    button.pressed::before { transform: translate(-50%, -50%) scale(.68); filter: brightness(.78) saturate(1.16); }
+    button.pressed::after { opacity: .2; transform: translate(-50%, -50%) scale(1.15); }
+    button.releasing::before { animation: control-release 220ms cubic-bezier(.2,.9,.24,1) both; }
+    button.releasing::after { animation: halo-release 220ms ease-out both; }
+    button:focus-visible { outline: 1px solid rgba(255,255,255,.82); outline-offset: -1px; }
     [data-action="max"] .restore { display: none; }
     body.maximized [data-action="max"] .maximize { display: none; }
     body.maximized [data-action="max"] .restore { display: inline; }
     @media (hover: hover) and (pointer: fine) {
-      button:hover { filter: brightness(1.06); }
-      .controls:hover .glyph { opacity: .78; transform: scale(1); }
+      button:hover::before { filter: brightness(1.08); box-shadow: 0 1px 3px rgba(0,0,0,.34); }
+      .controls:hover .glyph { opacity: .78; transform: translate(-50%, -50%) scale(1); }
     }
-    @media (prefers-reduced-motion: reduce) { button, .glyph { transition-duration: 0ms; } }
+    @keyframes control-release {
+      0% { transform: translate(-50%, -50%) scale(.68); filter: brightness(.78) saturate(1.16); }
+      52% { transform: translate(-50%, -50%) scale(1.16); filter: brightness(1.12) saturate(1.08); }
+      78% { transform: translate(-50%, -50%) scale(.95); filter: brightness(1); }
+      100% { transform: translate(-50%, -50%) scale(1); filter: brightness(1); }
+    }
+    @keyframes halo-release {
+      0% { opacity: .22; transform: translate(-50%, -50%) scale(1.05); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      button::before, button::after, .glyph { transition-duration: 0ms; }
+      button.releasing::before, button.releasing::after { animation: none; }
+      button.pressed::before { transform: translate(-50%, -50%); filter: brightness(.72); }
+      button.pressed::after { opacity: .24; transform: translate(-50%, -50%); }
+    }
   </style>
 </head>
 <body>
@@ -37,22 +72,42 @@
     <button data-action="max" title="最大化/还原" aria-label="最大化/还原"><span class="glyph maximize">&#8599;</span><span class="glyph restore">&#8601;</span></button>
   </div>
   <script>
-    const ACTIVATION_MS = 120;
+    const ACTIVATION_MS = 90;
+    const RELEASE_MS = 220;
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
     let actionPending = false;
+    const controls = document.querySelector('.controls');
 
-    document.querySelector('.controls').addEventListener('click', (event) => {
-      const button = event.target.closest('[data-action]');
+    const buttonFrom = (event) => event.target.closest('[data-action]');
+    const press = (button, pointerId) => {
+      if (!button || actionPending) return;
+      button.classList.remove('releasing');
+      button.classList.add('pressed');
+      if (pointerId !== undefined) button.setPointerCapture?.(pointerId);
+    };
+    const release = (button) => {
+      if (!button) return;
+      button.classList.remove('pressed');
+      button.classList.remove('releasing');
+      void button.offsetWidth;
+      button.classList.add('releasing');
+      setTimeout(() => button.classList.remove('releasing'), reducedMotion ? 0 : RELEASE_MS);
+    };
+
+    controls.addEventListener('pointerdown', (event) => press(buttonFrom(event), event.pointerId));
+    controls.addEventListener('pointerup', (event) => release(buttonFrom(event)));
+    controls.addEventListener('pointercancel', (event) => release(buttonFrom(event)));
+    controls.addEventListener('lostpointercapture', (event) => release(buttonFrom(event)));
+
+    controls.addEventListener('click', (event) => {
+      const button = buttonFrom(event);
       if (!button || !window.dshWin || actionPending) return;
       actionPending = true;
-      button.classList.add('activating');
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          button.classList.remove('activating');
-          actionPending = false;
-          window.dshWin[button.dataset.action]({ reducedMotion });
-        }, reducedMotion ? 0 : ACTIVATION_MS);
-      });
+      if (!button.classList.contains('releasing')) release(button);
+      setTimeout(() => {
+        actionPending = false;
+        window.dshWin[button.dataset.action]({ reducedMotion });
+      }, reducedMotion ? 0 : ACTIVATION_MS);
     });
   </script>
 </body>
