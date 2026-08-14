@@ -20,6 +20,8 @@ assert.match(main, /contentView\.addChildView/);
 assert.match(main, /requestSingleInstanceLock/, "a second launch must reuse the existing app instance");
 assert.match(main, /second-instance/, "the primary instance must handle a repeated launch");
 assert.match(main, /isMinimized\(\)[\s\S]*restore\(\)[\s\S]*focus\(\)/, "a repeated launch must restore and focus the existing window");
+assert.match(main, /isDshBackend/, "an occupied 3080 port must be verified before reuse");
+assert.match(main, /occupied by a non-Harness service/, "foreign services on 3080 must fail clearly instead of being opened");
 assert.match(main, /loadFile\([^)]*loading\.html/, "cold start must show a local loading surface before the backend is ready");
 assert.match(main, /createWindow\(\);[\s\S]*scheduleAutoUpdates\(\);[\s\S]*await ensureDshBackend\(\)/, "window and updater must start before the slow backend wait");
 assert.match(main, /x:\s*26/, "traffic-light controls must move right by one former dot width");

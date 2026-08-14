@@ -2,6 +2,7 @@
 const { app, BrowserWindow, WebContentsView, ipcMain, screen, Notification } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
@@ -88,8 +89,38 @@ function portOpen(port, timeout = 1500) {
   });
 }
 
+function isDshBackend(port = 3080, timeout = 2000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const request = http.get({ host: "127.0.0.1", port, path: "/" }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        if (body.length < 65536) body += chunk;
+      });
+      response.on("end", () => {
+        finish(response.statusCode === 200 && /<title>\s*DeepSeek Harness\s*<\/title>/i.test(body));
+      });
+    });
+    request.on("error", () => finish(false));
+    request.setTimeout(timeout, () => { request.destroy(); finish(false); });
+  });
+}
+
 async function ensureDshBackend() {
-  if (await portOpen(3080)) { log("3080 already open, reuse"); return true; }
+  if (await portOpen(3080)) {
+    if (await isDshBackend(3080)) {
+      log("existing DeepSeek Harness on 3080, reuse without replacing it");
+      return true;
+    }
+    log("3080 is occupied by a non-Harness service");
+    return false;
+  }
   const backend = resolveBackend();
   if (!backend) { log("bundled backend runtime is missing"); return false; }
   try {
