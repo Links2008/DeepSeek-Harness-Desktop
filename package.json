@@ -1,16 +1,19 @@
 {
   "name": "dsh-desktop",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "Windows desktop shell and one-click installer for DeepSeek Harness",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
-    "test": "node tests/installer_runtime.test.js",
+    "test": "node tests/installer_runtime.test.js && node tests/window_chrome_update.test.js",
     "build:installer": "electron-builder --config electron-builder.yml --win nsis --x64"
   },
   "devDependencies": {
     "electron": "^43.4.0",
     "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

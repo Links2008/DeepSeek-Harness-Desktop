@@ -1,5 +1,5 @@
-// DeepSeek Harness Electron 桌面壳(v3:透明窗口 + 180px 圆角 + 自绘控制按钮)
-const { app, BrowserWindow, ipcMain, screen } = require("electron");
+// DeepSeek Harness Electron 桌面壳
+const { app, BrowserWindow, WebContentsView, ipcMain, screen } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const fs = require("fs");
@@ -10,6 +10,7 @@ const URL = "http://127.0.0.1:3080";
 const WIN_RADIUS = 30; // 窗口四角圆角(2026-08-14 用户最终确认:30px)
 let dshProc = null;
 let mainWindow = null;
+let controlsView = null;
 let mainWindowMaximized = false;
 let normalWindowBounds = null;
 
@@ -18,6 +19,30 @@ function log(msg) {
     const logFile = path.join(app.getPath("userData"), "dsh_desktop.log");
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch (e) {}
+}
+
+function scheduleAutoUpdates() {
+  if (!app.isPackaged) return;
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (e) {
+    log("updater unavailable: " + e.message);
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.on("checking-for-update", () => log("checking for update"));
+  autoUpdater.on("update-available", (info) => log("update available: " + info.version));
+  autoUpdater.on("update-not-available", () => log("update not available"));
+  autoUpdater.on("update-downloaded", (info) => log("update ready for next quit: " + info.version));
+  autoUpdater.on("error", (e) => log("update error: " + e.message));
+  const checkForUpdates = () => autoUpdater.checkForUpdates().catch((e) => log("update check failed: " + e.message));
+  const firstCheck = setTimeout(checkForUpdates, 30000);
+  const recurringCheck = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
+  firstCheck.unref();
+  recurringCheck.unref();
 }
 
 function resolveBackend() {
@@ -71,57 +96,62 @@ async function ensureDshBackend() {
   return false;
 }
 
-function injectWindowChrome() {
-  mainWindow.webContents.insertCSS(`
+async function injectWindowChrome() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await mainWindow.webContents.insertCSS(`
+    :root { --dsh-window-radius: ${WIN_RADIUS}px; }
     html, body { background: transparent !important; }
-    #root, #app, body > div:first-child { border-radius: ${WIN_RADIUS}px !important; overflow: hidden !important; }
-    .dsh-win-controls {
-      position: fixed; top: 10px; right: 10px; z-index: 2147483647;
-      display: flex; gap: 4px; -webkit-app-region: no-drag;
+    html, body, #root, #app, body > div:first-child {
+      border-radius: var(--dsh-window-radius) !important;
+      overflow: hidden !important;
     }
-    .dsh-win-control {
-      width: 28px; height: 28px; padding: 0; border: none; border-radius: 5px; background: transparent; color: #d8d8dc;
-      display: grid; place-items: center; cursor: pointer; line-height: 1;
-      font: 500 13px/1 "Segoe UI Symbol", sans-serif;
-      box-shadow: none; transition: background .15s, color .15s;
-    }
-    .dsh-win-control:hover { background: rgba(255,255,255,.10); color: #fff; }
-    .dsh-win-control[data-action="close"]:hover { background: #e5484d; }
-    .dsh-win-control[data-action="max"] .restore-icon { display: none; }
-    .dsh-win-controls.dsh-maximized [data-action="max"] .maximize-icon { display: none; }
-    .dsh-win-controls.dsh-maximized [data-action="max"] .restore-icon { display: inline; }
+    body { clip-path: inset(0 round var(--dsh-window-radius)); }
+    .dsh-drag-region { position: fixed; top: 4px; left: 76px; width: 156px; height: 22px; z-index: 2147483646; -webkit-app-region: drag; }
   `);
-  mainWindow.webContents.executeJavaScript(`
+  await mainWindow.webContents.executeJavaScript(`
     (function () {
-      if (!document.querySelector('.dsh-drag-region')) {
+      function ensureChrome() {
+        if (!document.body) return;
+        if (!document.querySelector('.dsh-drag-region')) {
         var drag = document.createElement('div');
         drag.className = 'dsh-drag-region';
-        drag.style.cssText = 'position:fixed;top:0;left:0;right:108px;height:48px;z-index:2147483646;-webkit-app-region:drag;';
+        drag.setAttribute('aria-hidden', 'true');
+        drag.addEventListener('dblclick', function () { if (window.dshWin) window.dshWin.max(); });
         document.body.appendChild(drag);
+        }
       }
-      if (!document.querySelector('.dsh-win-controls')) {
-        var controls = document.createElement('div');
-        controls.className = 'dsh-win-controls';
-        controls.innerHTML = '<button class="dsh-win-control" data-action="min" title="最小化">&#8722;</button>' +
-          '<button class="dsh-win-control" data-action="max" title="最大化/还原"><span class="maximize-icon">&#9633;</span><span class="restore-icon">&#10064;</span></button>' +
-          '<button class="dsh-win-control" data-action="close" title="关闭">&#10005;</button>';
-        controls.addEventListener('click', function (event) {
-          var button = event.target.closest('[data-action]');
-          if (button && window.dshWin) window.dshWin[button.dataset.action]();
-        });
-        document.body.appendChild(controls);
+      ensureChrome();
+      if (!window.__dshChromeObserver) {
+        window.__dshChromeObserver = new MutationObserver(function () { queueMicrotask(ensureChrome); });
+        window.__dshChromeObserver.observe(document.documentElement, { childList: true, subtree: true });
       }
     })();
   `);
 }
 
+async function createControlsOverlay() {
+  controlsView = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+  controlsView.setBackgroundColor("#00000000");
+  controlsView.setBounds({ x: 26, y: 10, width: 48, height: 12 });
+  mainWindow.contentView.addChildView(controlsView);
+  await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
+}
+
 function updateMaximizedChrome(maximized) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const radius = maximized ? 0 : WIN_RADIUS;
-  mainWindow.webContents.insertCSS(`#root, #app, body > div:first-child { border-radius: ${radius}px !important; }`);
   mainWindow.webContents.executeJavaScript(
-    `document.querySelector('.dsh-win-controls')?.classList.toggle('dsh-maximized', ${maximized})`
+    `document.documentElement.style.setProperty('--dsh-window-radius', '${radius}px')`
   );
+  if (controlsView && !controlsView.webContents.isDestroyed()) {
+    controlsView.webContents.executeJavaScript(`document.body.classList.toggle('maximized', ${maximized})`).catch(() => {});
+  }
 }
 
 function createWindow() {
@@ -132,6 +162,7 @@ function createWindow() {
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
+    show: false,
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -139,18 +170,38 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
-  mainWindow.loadURL(URL);
-  // 注入 UI:多次尝试(页面 SPA 重渲染会清掉注入的按钮,延时重试)
-  const tryInject = (delay) => {
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        try { injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
-      }
-    }, delay);
+  let renderReady = false;
+  let chromeReady = false;
+  let controlsReady = false;
+  let revealed = false;
+  const revealWhenReady = () => {
+    if (!revealed && renderReady && chromeReady && controlsReady && mainWindow && !mainWindow.isDestroyed()) {
+      revealed = true;
+      mainWindow.show();
+    }
   };
-  mainWindow.webContents.on("did-finish-load", () => { tryInject(800); tryInject(3000); tryInject(8000); });
+  createControlsOverlay()
+    .catch((e) => log("controls overlay error: " + e.message))
+    .finally(() => { controlsReady = true; revealWhenReady(); });
+  mainWindow.webContents.on("dom-ready", async () => {
+    try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
+    chromeReady = true;
+    revealWhenReady();
+  });
+  mainWindow.once("ready-to-show", () => {
+    renderReady = true;
+    revealWhenReady();
+  });
+  mainWindow.loadURL(URL).catch((e) => log("load error: " + e.message));
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      log("window reveal fallback");
+      mainWindow.show();
+    }
+  }, 10000);
   mainWindow.on("closed", () => {
     mainWindow = null;
+    controlsView = null;
     mainWindowMaximized = false;
     normalWindowBounds = null;
     if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
@@ -181,6 +232,7 @@ app.whenReady().then(async () => {
   const ok = await ensureDshBackend();
   if (!ok) { log("backend failed, quitting"); app.quit(); return; }
   createWindow();
+  scheduleAutoUpdates();
   log("window created");
 });
 

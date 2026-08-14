@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe"><strong>下载 Windows 安装器</strong></a>
+  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe"><strong>下载 Windows 安装器</strong></a>
   · <a href="#为什么需要桌面版">为什么做</a>
   · <a href="#从源码构建">从源码构建</a>
   · <a href="https://github.com/Links2008/Deepseek-Harness-/issues">问题反馈</a>
@@ -27,7 +27,7 @@
 
 ## 一分钟开始
 
-1. 下载 [`DeepSeekHarness-Setup-1.0.1.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe)。
+1. 下载 [`DeepSeekHarness-Setup-1.1.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe)。
 2. 运行安装向导，选择安装目录和磁盘。
 3. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -39,7 +39,7 @@
 | --- | --- |
 | 需要准备 Node.js、pnpm、源码和依赖 | 安装器内置独立 Node.js 与完整运行时 |
 | 启动依赖命令行和固定工作目录 | 提供桌面与开始菜单快捷方式 |
-| Web 页面缺少桌面窗口控制 | 自绘最小化、最大化/还原和关闭按钮 |
+| Web 页面缺少桌面窗口控制 | 左上角独立原生三色控件，不受设置页模糊影响 |
 | 图标、任务栏和快捷方式不统一 | 使用统一的圆角鲸鱼图标 |
 | 安装路径固定或安装过程缓慢 | 向导式 NSIS 安装器，可选磁盘并使用 ZIP 载荷 |
 | 担心配置或会话被打进安装包 | 不打包用户的 `~/.dsh`、凭据、Cookie 或会话 |
@@ -50,7 +50,11 @@
 - 内置独立 Node.js 与 DeepSeek Harness 运行时。
 - 自动启动 Web 后端，关闭窗口时同步清理后端进程与端口。
 - 无边框圆角窗口，支持最小化、最大化、还原和退出。
+- 首个可见帧前完成圆角处理，设置页切换不再出现方角闪烁。
+- 12px 红黄绿窗口控件使用独立原生覆盖层，带短促按压反馈。
 - 最大化/还原时保存正确的窗口边界。
+- 后台检查 GitHub Releases，下载完成后在退出应用时自动安装更新。
+- GitHub Actions 每天检查 DeepSeek Harness 上游，构建通过安装、HTTP 200 和进程清理验收后才发布。
 - 自动创建桌面快捷方式、开始菜单入口和卸载项。
 - 安装时可选择目录和磁盘。
 - 保留当前 Windows 用户已有的 `~/.dsh` 配置与会话。
@@ -59,10 +63,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 当前版本 | `v1.0.1` |
-| 安装器 | [`DeepSeekHarness-Setup-1.0.1.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.0.1/DeepSeekHarness-Setup-1.0.1.exe) |
-| 文件大小 | `342,392,255` 字节（约 `326.53 MiB`） |
-| SHA-256 | `ED2916D3881202F4ABB49B6C7688A446F92E4BABE9007CA6B6E9424CE777D467` |
+| 当前版本 | `v1.1.0` |
+| 安装器 | [`DeepSeekHarness-Setup-1.1.0.exe`](https://github.com/Links2008/Deepseek-Harness-/releases/download/v1.1.0/DeepSeekHarness-Setup-1.1.0.exe) |
+| 文件大小 | `342,859,587` 字节（约 `326.98 MiB`） |
+| SHA-256 | `159EBF653A3847E87BE529FB0CFC939445FBB67C078AFD59AAC8514BC32E6B82` |
 | 系统要求 | Windows 10/11 x64 |
 
 安装器暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。你可以对照上面的 SHA-256，并审计本仓库中的桌面壳与构建配置。
@@ -70,8 +74,10 @@
 ## 已验证行为
 
 - 安装器可选择安装目录和磁盘。
-- 完整运行时包含 20,937 个文件。
+- 解包后的完整应用包含 21,014 个文件。
 - `v1.0.1` 修复安装载荷的 ZIP/7z 格式错配，避免“Failed to decompress files”。
+- `v1.1.0` 修复首次显示与设置页切换的圆角闪烁，三色控件在设置模糊层上保持清晰。
+- 自动更新元数据 `latest.yml` 和安装目录内的 `app-update.yml` 已生成并验证。
 - 内置 DeepSeek Harness CLI 版本为 `0.1.0-rc.5`。
 - 安装后 Web 根页面返回 HTTP 200。
 - 后端进程使用安装目录内的 `resources/node/node.exe`。
@@ -128,12 +134,17 @@ npm run build:installer
 .
 ├─ main.js                         Electron 主进程与窗口控制
 ├─ preload.js                      安全的窗口控制 IPC 桥
+├─ window-controls.html            独立原生三色窗口控件
 ├─ electron-builder.yml            NSIS、图标和运行时打包配置
 ├─ package.json                    项目元数据与构建命令
+├─ upstream-lock.json               当前跟随的 DeepSeek Harness 提交
+├─ .github/workflows/
+│  └─ upstream-sync.yml             上游检测、构建、验收和发布
 ├─ scripts/
 │  └─ create-runtime-manifest.mjs  生成独立运行时清单
 ├─ tests/
-│  └─ installer_runtime.test.js    安装器配置回归测试
+│  ├─ installer_runtime.test.js    安装器配置回归测试
+│  └─ window_chrome_update.test.js 窗口与自动更新回归测试
 └─ deepseek_whale_hermes_rounded.* 应用图标
 ```
 
@@ -155,6 +166,7 @@ npm run build:installer
 
 - DeepSeek Harness 上游目前处于 Developer Preview，可能出现不兼容更新。
 - 首次启动需要生成 Web profile，部分电脑可能需要约 30–70 秒。
+- `v1.0.1` 本身没有更新客户端，需要手动安装一次 `v1.1.0`；之后的桌面版本可自动更新。
 - 已安装旧版时，NSIS 会按更新处理并沿用原安装目录；如需更换磁盘，请先卸载旧版。
 - 当前安装器没有商业代码签名，SmartScreen 提示不代表文件校验失败。
 

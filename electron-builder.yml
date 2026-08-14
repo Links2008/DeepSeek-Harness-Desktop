@@ -5,6 +5,7 @@ directories:
 files:
   - main.js
   - preload.js
+  - window-controls.html
   - package.json
 extraResources:
   - from: bundle/node/node.exe
@@ -25,6 +26,11 @@ win:
   icon: deepseek_whale_hermes_rounded.ico
 electronVersion: 43.4.0
 artifactName: DeepSeekHarness-Setup-${version}.${ext}
+publish:
+  - provider: github
+    owner: Links2008
+    repo: Deepseek-Harness-
+    releaseType: release
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { color-scheme: dark; --ease-out: cubic-bezier(.23, 1, .32, 1); }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    body { display: flex; }
+    .controls { display: flex; gap: 6px; }
+    button {
+      width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%;
+      display: grid; place-items: center; color: rgba(25,25,25,.72); cursor: pointer;
+      font: 700 8px/1 "Segoe UI Symbol", sans-serif;
+      transition: transform 140ms var(--ease-out), filter 140ms ease;
+    }
+    [data-action="close"] { background: #ff5f57; }
+    [data-action="min"] { background: #febc2e; }
+    [data-action="max"] { background: #28c840; }
+    .glyph { opacity: 0; transform: scale(.9); transition: opacity 120ms ease, transform 140ms var(--ease-out); }
+    button:active { transform: scale(.84); filter: brightness(.9); }
+    button:focus-visible { outline: 1px solid rgba(255,255,255,.82); outline-offset: -2px; }
+    [data-action="max"] .restore { display: none; }
+    body.maximized [data-action="max"] .maximize { display: none; }
+    body.maximized [data-action="max"] .restore { display: inline; }
+    @media (hover: hover) and (pointer: fine) {
+      button:hover { filter: brightness(1.06); }
+      .controls:hover .glyph { opacity: .78; transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) { button, .glyph { transition-duration: 0ms; } }
+  </style>
+</head>
+<body>
+  <div class="controls" role="group" aria-label="窗口控制">
+    <button data-action="close" title="关闭" aria-label="关闭"><span class="glyph">&#215;</span></button>
+    <button data-action="min" title="最小化" aria-label="最小化"><span class="glyph">&#8722;</span></button>
+    <button data-action="max" title="最大化/还原" aria-label="最大化/还原"><span class="glyph maximize">&#8599;</span><span class="glyph restore">&#8601;</span></button>
+  </div>
+  <script>
+    document.querySelector('.controls').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-action]');
+      if (button && window.dshWin) window.dshWin[button.dataset.action]();
+    });
+  </script>
+</body>
+</html>
