@@ -184,7 +184,7 @@ jobs:
           if ($actualSha512 -ne $expectedSha512) { throw 'Installer SHA-512 does not match latest.yml' }
           $appUpdate = Get-Content $appUpdatePath -Raw
           if ($appUpdate -notmatch '(?m)^owner:\s*Links2008\s*$' -or
-              $appUpdate -notmatch '(?m)^repo:\s*Deepseek-Harness-\s*$') {
+              $appUpdate -notmatch '(?m)^repo:\s*DeepSeek-Harness-Desktop\s*$') {
             throw 'app-update.yml does not point to the public desktop release feed'
           }
           $followed = Get-Content upstream-lock.json -Raw | ConvertFrom-Json

@@ -51,7 +51,7 @@ try {
   $updatePath = Join-Path $installRoot 'resources\app-update.yml'
   $updateFeed = Get-Content $updatePath -Raw
   if ($updateFeed -notmatch '(?m)^owner:\s*Links2008\s*$' -or
-      $updateFeed -notmatch '(?m)^repo:\s*Deepseek-Harness-\s*$') {
+      $updateFeed -notmatch '(?m)^repo:\s*DeepSeek-Harness-Desktop\s*$') {
     throw 'Installed updater feed is incorrect'
   }
 

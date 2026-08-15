@@ -1,233 +1,127 @@
 <p align="center">
-  <img src="deepseek_whale_hermes_rounded.png" width="132" alt="DeepSeek Harness Desktop 图标">
+  <img src="deepseek_whale_hermes_rounded.png" width="128" alt="DeepSeek Harness Desktop">
 </p>
 
 <h1 align="center">DeepSeek Harness Desktop</h1>
 
 <p align="center">
-  让 DeepSeek Harness 在 Windows 上像普通桌面应用一样安装、启动和退出。
+  把 DeepSeek Harness 变成真正适合 Windows 的桌面应用：一键安装、原生通知、顺滑窗口控制与自动更新。
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/latest"><img src="https://img.shields.io/github/v/release/Links2008/Deepseek-Harness-?display_name=tag&style=flat-square" alt="Latest release"></a>
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases"><img src="https://img.shields.io/github/downloads/Links2008/Deepseek-Harness-/total?style=flat-square" alt="Downloads"></a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><img src="https://img.shields.io/github/v/release/Links2008/DeepSeek-Harness-Desktop?display_name=tag&style=flat-square" alt="Latest release"></a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases"><img src="https://img.shields.io/github/downloads/Links2008/DeepSeek-Harness-Desktop/total?style=flat-square" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&style=flat-square" alt="Windows 10 and 11">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-31c854?style=flat-square" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/Deepseek-Harness-/releases/latest"><strong>下载最新版 Windows 安装器</strong></a>
-  · <a href="#为什么需要桌面版">为什么做</a>
-  · <a href="#从源码构建">从源码构建</a>
-  · <a href="https://github.com/Links2008/Deepseek-Harness-/issues">问题反馈</a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载最新版</strong></a>
+  · <a href="#项目来源与分支谱系">上游来源</a>
+  · <a href="#自动更新">自动更新</a>
+  · <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/issues">问题反馈</a>
 </p>
 
-> [!NOTE]
-> 这是围绕 [DeepSeek AI](https://github.com/deepseek-ai) 官方开源项目 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 制作的社区 Windows 桌面封装。DeepSeek AI 负责上游 Harness；本仓库负责 Windows 桌面壳、独立运行时、安装器和相关验收。
+> [!IMPORTANT]
+> 这是由 [Links2008](https://github.com/Links2008) 维护的**非官方 Windows 桌面发行版**。DeepSeek Harness 核心来自 [DeepSeek-AI 官方仓库](https://github.com/deepseek-ai/deepseek-harness)；本仓库不代表 DeepSeek-AI 官方桌面客户端。
+
+## 产品预览
+
+<p align="center">
+  <img src="docs/images/desktop-home.png" width="100%" alt="DeepSeek Harness Desktop 主界面">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/agent-presets.png" alt="Agent 预设"></td>
+    <td width="50%"><img src="docs/images/compact-sidebar.png" alt="紧凑侧栏"></td>
+  </tr>
+  <tr>
+    <td align="center">Agent 预设与模式切换</td>
+    <td align="center">紧凑侧栏与沉浸工作区</td>
+  </tr>
+</table>
+
+## 核心能力
+
+- Windows 10/11 x64 一键安装，内置独立 Node.js 与 Harness 运行时。
+- 红、黄、绿三色窗口控件具备按压与回弹反馈，并使用原生最大化/还原。
+- 每次任务真正完成时发送 Windows 系统通知，点击可返回结果。
+- 单实例启动、冷启动页、圆角无边框窗口和完整的后端进程清理。
+- 保留用户已有的 `~/.dsh` 配置、凭据与会话，不打包任何本机隐私数据。
+- 通过 GitHub Releases 自动检查、下载并在退出应用后安装新版本。
 
 ## 一分钟开始
 
-1. 打开 [Latest Release](https://github.com/Links2008/Deepseek-Harness-/releases/latest)，下载 `DeepSeekHarness-Setup-<版本>.exe`。
-2. 运行安装向导，选择安装目录和磁盘。
-3. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
+1. 前往 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
+2. 下载 `DeepSeekHarness-Setup-<版本>.exe`。
+3. 运行安装向导并选择安装目录。
+4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
-安装包已经包含 Node.js 和 DeepSeek Harness 运行时，普通用户不需要预装 Node.js、pnpm，也不需要克隆上游源码。
+> [!NOTE]
+> 安装包暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。可在 Release 说明中核对 SHA-256，并审计本仓库的构建工作流。
 
-## 为什么需要桌面版
+## 项目来源与分支谱系
 
-| 原始使用门槛 | 桌面版的解决方式 |
+本仓库在 GitHub 元数据中是独立仓库，不伪装成官方 Fork；代码来源与构建谱系公开记录如下：
+
+```text
+deepseek-ai/deepseek-harness
+└─ 官方分支：master
+   └─ 当前锁定：47f943859bef60e4160492346772ded9b24f765a
+      └─ Harness：0.1.0-rc.5
+         └─ Windows 桌面发行：Links2008/DeepSeek-Harness-Desktop（main）
+```
+
+| 项目 | 当前值 |
 | --- | --- |
-| 需要准备 Node.js、pnpm、源码和依赖 | 安装器内置独立 Node.js 与完整运行时 |
-| 启动依赖命令行和固定工作目录 | 提供桌面与开始菜单快捷方式 |
-| Web 页面缺少桌面窗口控制 | 左上角独立原生三色控件，不受设置页模糊影响 |
-| 任务结束后需要反复切回窗口查看 | 每次任务完成均发送 Windows 系统通知，点击即可回到结果 |
-| 图标、任务栏和快捷方式不统一 | 使用统一的圆角鲸鱼图标 |
-| 安装路径固定或安装过程缓慢 | 向导式 NSIS 安装器，可选磁盘并使用 ZIP 载荷 |
-| 担心配置或会话被打进安装包 | 不打包用户的 `~/.dsh`、凭据、Cookie 或会话 |
+| 官方上游 | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) |
+| 跟随分支 | `master` |
+| 锁定提交 | [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a) |
+| 上游版本 | `0.1.0-rc.5` |
+| 桌面仓库分支 | `main` |
+| 状态文件 | [`upstream-lock.json`](upstream-lock.json) |
 
-## 核心功能
+GitHub Actions 每天检查官方 `master`。只有上游变化、桌面壳变化、人工强制构建或失败发布修复时才打包；未变化时直接停止。
 
-- Windows 10/11 x64 桌面应用。
-- 内置独立 Node.js 与 DeepSeek Harness 运行时。
-- 自动启动 Web 后端，关闭窗口时同步清理后端进程与端口。
-- 无边框圆角窗口，支持最小化、最大化、还原和退出。
-- 首个可见帧前完成圆角处理，设置页切换不再出现方角闪烁。
-- 10px 红黄绿窗口控件使用独立原生覆盖层和 16px 命中区；`pointerdown` 即时按压，释放后清晰回弹。
-- 最大化/还原交给 Electron 原生 `maximize()/unmaximize()` 和 Windows DWM，避免逐帧改窗口边界造成卡顿。
-- 任务由“运行中 → 完成/空闲”的真实状态边沿触发 Windows 通知；每个完成事件都通知，等待审批或回答不会误报，同一事件在 30 秒内去重。
-- 单实例启动：重复点击快捷方式会恢复并聚焦现有窗口，不会重复启动后端。
-- 冷启动先显示本地启动页，自动更新检查不再被后端初始化阻塞。
-- 启动 30 秒后检查 GitHub Releases，之后每 6 小时重试；下载完成后在退出应用时自动安装更新。
-- GitHub Actions 在桌面壳关键代码推送时立即运行，并于每天北京时间 10:17 检查 DeepSeek Harness 上游；只有新变化、人工 force 或残缺草稿修复才构建完整安装包。
-- 自动创建桌面快捷方式、开始菜单入口和卸载项。
-- 安装时可选择目录和磁盘。
-- 保留当前 Windows 用户已有的 `~/.dsh` 配置与会话。
+## 自动更新
 
-## 自动推包与客户端更新链路
+桌面端启动 30 秒后检查 GitHub Releases，之后每 6 小时重试。下载完成后不会强行中断工作，而是在用户正常退出应用时安装。
 
-1. **触发**：桌面壳关键文件推送到 `main` 时立即运行；每天 10:17（北京时间）检查一次 Harness 上游；也可以人工 `workflow_dispatch` force 验收。
-2. **发布决策**：先检查当前桌面版本的 GitHub Release、两个必要资产和远端 `latest.yml`。完整且无新变化就停止，不消耗构建时间。
-3. **版本状态机**：上游变化、桌面壳变化或 force 才递增补丁版本；若版本提交后发布中断，下次运行修复同一版本，不会连续跳号。
-4. **构建**：固定 Node.js 与 pnpm 版本，构建上游 `vendor`/`dsh` release families，再生成独立 Windows 运行时和 NSIS 安装器。
-5. **产物门禁**：校验 `latest.yml` 版本与文件名、安装器 SHA-512、`app-update.yml` 更新源以及 `upstream-lock.json`。
-6. **隔离安装验收**：把候选版静默安装到 GitHub runner 临时目录，验证 FileVersion、开始菜单 AppID、内置 Harness 版本和 HTTP 200；随后清理进程、确认 3080 端口释放并静默卸载。
-7. **提交状态**：只有前面全部通过，机器人才能提交 `package.json`、`package-lock.json` 与 `upstream-lock.json`。该提交使用 `GITHUB_TOKEN`，不会递归触发本工作流。
-8. **草稿发布**：Release 先保持 draft；只补传缺失或不匹配的资产。安装器和 `latest.yml` 的远端名称、状态与字节数全部通过后，才切换为公开 Latest Release。
-9. **客户端升级**：已安装客户端启动 30 秒后检查，以后每 6 小时重试；下载成功后等待用户退出应用再安装，不会在运行中强行替换文件。
+发布链路依次验证测试、安装包完整性、`latest.yml` SHA-512、`app-update.yml` 更新源、隔离安装、AppID、HTTP 200、运行时版本、端口清理与卸载。任何关键步骤失败都会停止发布。
 
-失败恢复遵循 fail-closed：
-
-| 失败位置 | 结果与恢复方式 |
-| --- | --- |
-| 上游构建、测试或打包失败 | 不提交版本、不创建 Release；修复后重跑 |
-| 安装验收或卸载失败 | 不发布；`finally` 仍清理进程并检查 3080 端口 |
-| 版本状态已提交但上传中断 | 保留同版本 draft；下次定时、重跑或 dispatch 原地续传 |
-| 公开 Release 被发现缺资产或元数据损坏 | 停止并报错，不自动覆盖正在服务客户端的公开版本 |
-| 客户端检查或下载失败 | 保留当前可用版本；下次启动或 6 小时周期自动重试 |
-
-这套 Actions 只运行 Git、Node.js、pnpm、electron-builder、7-Zip、NSIS 和 GitHub CLI，不调用 OpenAI/Codex API，因此自动检查、构建和推包不会消耗 GPT/Codex 额度。只有人工让 Codex 排查或修改代码时才会使用 Codex 额度。
-
-## 下载与校验
-
-| 项目 | 内容 |
-| --- | --- |
-| 最新版本 | [GitHub Latest Release](https://github.com/Links2008/Deepseek-Harness-/releases/latest) |
-| 安装器 | `DeepSeekHarness-Setup-<版本>.exe` |
-| SHA-256 | 每个 Release 的说明由机器人写入安装器字节数和 SHA-256 |
-| 更新校验 | `latest.yml` 的 SHA-512、GitHub 构建来源证明和本仓库 CI 验收 |
-| 系统要求 | Windows 10/11 x64 |
-
-安装器暂未使用商业代码签名证书，Windows SmartScreen 可能显示“未知发布者”。你可以对照上面的 SHA-256，并审计本仓库中的桌面壳与构建配置。
-
-## 已验证行为
-
-- 安装器可选择安装目录和磁盘。
-- 安装载荷包含 21,016 个文件；7-Zip 完整性测试结果为 `Everything is Ok`。
-- `v1.0.1` 修复安装载荷的 ZIP/7z 格式错配，避免“Failed to decompress files”。
-- `v1.1.0` 修复首次显示与设置页切换的圆角闪烁，三色控件在设置模糊层上保持清晰。
-- `v1.1.0` 加入三色控件点击反馈、最大化/还原缓动、单实例保护、冷启动页和后台任务完成通知。
-- 下一版本候选已把三控件改为按下即反馈、释放回弹与原生最大化/还原；16px 命中区保留 10px 视觉圆点。
-- Windows 实机连续两次记录到 `task completed → notification attempted → notification shown → notification closed`，且没有 `notification failed`；通知卡片截图与点击回到结果仍需单独做视觉验收。
-- 自动更新元数据 `latest.yml` 和安装目录内的 `app-update.yml` 已生成并验证。
-- 内置 DeepSeek Harness CLI 版本为 `0.1.0-rc.5`。
-- 安装后 Web 根页面返回 HTTP 200。
-- 后端进程使用安装目录内的 `resources/node/node.exe`。
-- 正常关闭后，桌面主进程、后端进程和 3080 端口均退出。
-- 最小化、最大化、还原和关闭已在 Windows 实机验证。
+自动检查、构建和发布仅使用 GitHub Actions、Node.js、electron-builder、7-Zip、NSIS 与 GitHub CLI，**不会调用 GPT、Codex 或 OpenAI API，也不会消耗 GPT/Codex 额度**。
 
 ## 从源码构建
 
-### 1. 安装桌面端依赖
-
 ```powershell
 npm ci
-```
-
-### 2. 打包官方 DeepSeek Harness 发布族
-
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 源码仓库完成官方构建，然后打包 `vendor` 与 `dsh` release families：
-
-```powershell
-pnpm run release:pack --family vendor --out D:\dsh-desktop\work\packed-vendor
-pnpm run release:pack --family dsh --out D:\dsh-desktop\work\packed-dsh
-```
-
-### 3. 生成独立运行时
-
-```powershell
-node scripts\create-runtime-manifest.mjs `
-  bundle\dsh-runtime `
-  work\packed-vendor `
-  work\packed-dsh
-
-Set-Location bundle\dsh-runtime
-npm install --no-audit --no-fund --package-lock=false --include=optional
-Set-Location ..\..
-```
-
-不要使用 `--omit=optional`：`koffi` 的 Windows 预编译二进制属于 optional dependency，省略后可能回退到本机 CMake 编译。
-
-### 4. 放入 Node.js 并构建
-
-```powershell
-New-Item -ItemType Directory -Path bundle\node -Force
-Copy-Item (Get-Command node.exe).Source bundle\node\node.exe
-
 npm test
 npm run build:installer
 ```
 
-安装器输出到 `installer-dist/`。
-
-## 项目结构
-
-```text
-.
-├─ main.js                         Electron 主进程与窗口控制
-├─ desktop-behavior.js             可独立测试的通知、标题与窗口行为规则
-├─ preload.js                      安全的窗口控制 IPC 桥
-├─ window-controls.html            独立原生三色窗口控件
-├─ electron-builder.yml            NSIS、图标和运行时打包配置
-├─ package.json                    项目元数据与构建命令
-├─ upstream-lock.json               当前跟随的 DeepSeek Harness 提交
-├─ .github/workflows/
-│  └─ upstream-sync.yml             上游检测、构建、验收和发布
-├─ scripts/
-│  ├─ create-runtime-manifest.mjs  生成独立运行时清单
-│  ├─ release-policy.cjs           可测试的发布/修复版本状态机
-│  └─ verify-installed-runtime.ps1 隔离安装、运行、清理和卸载验收
-├─ tests/
-│  ├─ desktop_behavior.test.js     通知策略、AppID 与窗口命令行为测试
-│  ├─ release_policy.test.js       发布决策与失败续跑测试
-│  ├─ update_pipeline_behavior.test.js 自动发布验收规则测试
-│  ├─ workflow_powershell_syntax.test.js 工作流内嵌脚本语法测试
-│  ├─ window_controls_behavior.test.js 三控件按压/回弹行为测试
-│  ├─ installer_runtime.test.js    安装器配置回归测试
-│  └─ window_chrome_update.test.js 窗口与自动更新回归测试
-└─ deepseek_whale_hermes_rounded.* 应用图标
-```
-
-构建所需的 `bundle/`、`node_modules/`、安装产物、日志和工作目录均由 `.gitignore` 排除。
-
-## 安全与隐私
-
-本项目不会把以下内容提交到仓库或写入公开安装包：
-
-- `.credentials.yaml`
-- API Key、Token 或 Cookie
-- `~/.dsh` 用户状态
-- 会话、登录状态与本机日志
-- `node_modules`、运行时缓存和构建缓存
-
-桌面应用运行时继续使用当前 Windows 用户自己的 `~/.dsh`。卸载或重装桌面壳不会主动删除这些配置。
-
-## 已知说明
-
-- DeepSeek Harness 上游目前处于 Developer Preview，可能出现不兼容更新。
-- 电脑已安装 Harness 时不会被覆盖：3080 上已有 Harness 会被复用；未运行时桌面版使用自己的内置运行时。用户自行启动的 Harness 也不会在关闭桌面窗口时被结束。
-- 首次启动需要生成 Web profile，部分电脑可能需要约 30–70 秒。
-- `v1.0.1` 本身没有更新客户端，需要手动安装一次 `v1.1.0`；之后的桌面版本可自动更新。
-- 自动更新失败不会替换当前安装；应用继续使用现有版本，并在下次启动或 6 小时周期到达时重试。可在 `%APPDATA%\dsh-desktop\dsh_desktop.log` 查看当前/远端版本、下载进度、缓存文件、安装时机和错误类别。
-- 已安装旧版时，NSIS 会按更新处理并沿用原安装目录；如需更换磁盘，请先卸载旧版。
-- 当前安装器没有商业代码签名，SmartScreen 提示不代表文件校验失败。
-
-## 参与贡献
-
-欢迎通过 [Issues](https://github.com/Links2008/Deepseek-Harness-/issues) 报告 Windows 安装、窗口控制、进程退出或打包问题。提交修复时，请保持改动聚焦，并先运行：
-
-```powershell
-npm test
-```
+构建完整安装器还需要 `bundle/node/node.exe` 与由官方 Harness release families 生成的 `bundle/dsh-runtime`。详细过程可直接查看 [自动构建工作流](.github/workflows/upstream-sync.yml)。
 
 ## 贡献者与致谢
 
-| 贡献者 | 贡献 |
+| 贡献者 | 主要贡献 |
 | --- | --- |
-| [DeepSeek AI](https://github.com/deepseek-ai) | 开发并开源 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，提供核心 Agent Harness、插件架构与 Web 运行能力 |
-| [Links2008](https://github.com/Links2008) | Windows 桌面壳、独立运行时封装、安装器、图标适配与 Windows 实机验收 |
+| [Links2008](https://github.com/Links2008) | Windows 桌面壳、安装器、通知、窗口交互、自动更新、发布链路与 Windows 实机验收 |
+| [DeepSeek-AI Team](https://github.com/deepseek-ai) | DeepSeek Harness 核心、Agent 能力、插件架构与 Web 运行时 |
+| [官方上游贡献者](https://github.com/deepseek-ai/deepseek-harness/graphs/contributors) | Harness 的持续开发、评审、修复与生态建设 |
+
+根据 GitHub Contributors 当前统计（2026-08-15），主要上游贡献者包括 [tianyicui](https://github.com/tianyicui)、[LegGasai](https://github.com/LegGasai)、[imccyu](https://github.com/imccyu)、[Chinesezjc](https://github.com/Chinesezjc)、[turtle1999](https://github.com/turtle1999)、[hypatiamay](https://github.com/hypatiamay)、[CreatixChu](https://github.com/CreatixChu)、[kermanx](https://github.com/kermanx)、[ZiyaZhang](https://github.com/ZiyaZhang) 与 [Kingwl](https://github.com/Kingwl)。完整且持续更新的名单以官方 Contributors 页面为准。
 
 感谢 Electron、Node.js、NSIS 及 DeepSeek Harness 依赖生态中的所有开源贡献者。
 
-## 开源协议
+## 安全与隐私
 
-本仓库中的桌面壳代码、构建脚本和配置文件遵循 [MIT License](LICENSE)。打包使用的 DeepSeek Harness 同样采用 MIT License；其他第三方依赖继续遵循各自的许可证。
+仓库与安装包不会包含 API Key、Token、Cookie、`.credentials.yaml`、`~/.dsh`、用户会话或本机日志。请不要在 Issue 中粘贴任何凭据。
+
+## 参与贡献
+
+欢迎通过 [Issues](https://github.com/Links2008/DeepSeek-Harness-Desktop/issues) 反馈 Windows 安装、通知、窗口控制、更新或打包问题。提交代码前请先运行 `npm test`。
+
+## 许可证
+
+本仓库的桌面壳、构建脚本和配置遵循 [MIT License](LICENSE)。打包使用的 DeepSeek Harness 及其他第三方依赖继续遵循各自许可证。

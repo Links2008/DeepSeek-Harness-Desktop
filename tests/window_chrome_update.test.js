@@ -67,7 +67,7 @@ assert.match(main, /checkForUpdates/);
 assert.match(main, /autoInstallOnAppQuit\s*=\s*true/);
 assert.match(builder, /provider:\s*github/);
 assert.match(builder, /owner:\s*Links2008/);
-assert.match(builder, /repo:\s*Deepseek-Harness-/);
+assert.match(builder, /repo:\s*DeepSeek-Harness-Desktop/);
 assert.match(builder, /desktop-behavior\.js/);
 assert.match(builder, /window-controls\.html/);
 assert.match(builder, /loading\.html/);
