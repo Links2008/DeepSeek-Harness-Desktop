@@ -12,6 +12,7 @@ const verifier = fs.readFileSync(
   path.join(root, "scripts", "verify-installed-runtime.ps1"),
   "utf8",
 );
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 assert.match(workflow, /workflow_dispatch:/, "the release pipeline needs a forceable acceptance run");
 assert.match(workflow, /inputs\.force|inputs\.force|inputs:\s*[\s\S]*force:/);
@@ -23,6 +24,7 @@ assert.match(workflow, /release\.outputs\.bump[\s\S]*npm version patch --no-git-
 assert.match(workflow, /git diff --cached --quiet[\s\S]*diffExitCode[\s\S]*-eq 1/, "release-state commits must branch on Git's exit code, not stdout");
 assert.match(workflow, /PSNativeCommandUseErrorActionPreference\s*=\s*\$true/, "native build failures must stop the workflow immediately");
 assert.match(workflow, /patch-upstream-windows-release\.cjs[\s\S]*release:pack/, "Windows CI must patch upstream child-process resolution before packing");
+assert.match(packageJson.scripts["build:installer"], /--publish\s+never/, "electron-builder must not publish before acceptance gates pass");
 assert.match(workflow, /resources[\\/]app-update\.yml/, "the installed updater feed must be verified");
 assert.match(workflow, /installer-dist[\\/]latest\.yml/, "release metadata must be checked before publish");
 assert.match(workflow, /SHA512[\s\S]*ComputeHash[\s\S]*latest\.yml/, "the installer hash must match release metadata");

@@ -7,7 +7,7 @@
   "main": "main.js",
   "scripts": {
     "test": "node tests/desktop_behavior.test.js && node tests/window_controls_behavior.test.js && node tests/release_policy.test.js && node tests/update_pipeline_behavior.test.js && node tests/workflow_powershell_syntax.test.js && node tests/installer_runtime.test.js && node tests/window_chrome_update.test.js",
-    "build:installer": "electron-builder --config electron-builder.yml --win nsis --x64"
+    "build:installer": "electron-builder --config electron-builder.yml --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "electron": "^43.4.0",
