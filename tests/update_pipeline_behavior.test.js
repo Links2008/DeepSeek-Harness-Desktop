@@ -41,6 +41,7 @@ assert.match(verifier, /7-Zip rejected[\s\S]*try\s*\{[\s\S]*Start-Process \$inst
 assert.match(verifier, /--version[\s\S]*ExpectedRuntimeVersion/, "the installed Harness CLI version must match the upstream lock");
 assert.match(verifier, /Uninstall[\s\S]*\/S/, "the CI-installed app must pass a silent uninstall check");
 assert.match(workflow, /gh release create[\s\S]*--draft/, "new releases must remain hidden while assets are uploaded");
+assert.match(workflow, /function Wait-TargetRelease[\s\S]*Start-Sleep[\s\S]*\$release = Wait-TargetRelease/, "draft creation must tolerate GitHub API propagation delay");
 assert.match(workflow, /gh release upload/, "draft recovery must upload missing or invalid assets");
 assert.match(workflow, /assets[\s\S]*\.size/, "remote asset names and sizes must be checked before publishing");
 assert.match(workflow, /gh release edit[\s\S]*--draft=false/, "only a verified draft may become public");
