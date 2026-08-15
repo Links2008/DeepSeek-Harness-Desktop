@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { patchReleaseProcess } = require("../scripts/patch-upstream-windows-release.cjs");
 
 const root = path.resolve(__dirname, "..");
 const workflow = fs.readFileSync(
@@ -21,6 +22,7 @@ assert.match(workflow, /release-policy\.cjs/, "release decisions must use the te
 assert.match(workflow, /release\.outputs\.bump[\s\S]*npm version patch --no-git-tag-version/, "repair runs must reuse the existing version");
 assert.match(workflow, /git diff --cached --quiet[\s\S]*diffExitCode[\s\S]*-eq 1/, "release-state commits must branch on Git's exit code, not stdout");
 assert.match(workflow, /PSNativeCommandUseErrorActionPreference\s*=\s*\$true/, "native build failures must stop the workflow immediately");
+assert.match(workflow, /patch-upstream-windows-release\.cjs[\s\S]*release:pack/, "Windows CI must patch upstream child-process resolution before packing");
 assert.match(workflow, /resources[\\/]app-update\.yml/, "the installed updater feed must be verified");
 assert.match(workflow, /installer-dist[\\/]latest\.yml/, "release metadata must be checked before publish");
 assert.match(workflow, /SHA512[\s\S]*ComputeHash[\s\S]*latest\.yml/, "the installer hash must match release metadata");
@@ -41,5 +43,19 @@ assert.match(workflow, /gh release upload/, "draft recovery must upload missing 
 assert.match(workflow, /assets[\s\S]*\.size/, "remote asset names and sizes must be checked before publishing");
 assert.match(workflow, /gh release edit[\s\S]*--draft=false/, "only a verified draft may become public");
 assert.doesNotMatch(workflow, /OPENAI_API_KEY|api\.openai\.com|@Codex/i, "automatic packaging must not call GPT or consume Codex quota");
+
+const upstreamProcessFixture = `
+const captured = spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8' })
+const inherited = spawnSync(command, [...args], { cwd: options.cwd, env: options.env, stdio: 'inherit' })
+`;
+const patchedUpstream = patchReleaseProcess(upstreamProcessFixture);
+assert.equal(patchedUpstream.changed, true);
+assert.equal((patchedUpstream.source.match(/shell: process\.platform === 'win32'/g) || []).length, 2);
+assert.equal(patchReleaseProcess(patchedUpstream.source).changed, false, "the patch must be idempotent");
+assert.throws(
+  () => patchReleaseProcess("spawnSync(command, args, {})"),
+  /upstream release process shape changed/,
+  "an upstream refactor must fail closed instead of silently skipping the compatibility patch",
+);
 
 console.log("update pipeline behavior verified");

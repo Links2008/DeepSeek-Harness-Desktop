@@ -118,6 +118,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           corepack enable
           corepack prepare pnpm@11.7.0 --activate
+          node scripts/patch-upstream-windows-release.cjs upstream/scripts/release/process.ts
           Push-Location upstream
           pnpm install --frozen-lockfile
           pnpm run build
