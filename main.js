@@ -185,30 +185,36 @@ async function injectWindowChrome() {
       --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
     }
     html, body { background: ${APP_BG} !important; }
-    .dsh-drag-region {
-      position: fixed; top: 0; height: 36px;
-      left: calc(var(--dsh-sidebar-width) + 120px); right: 400px;
-      z-index: 2147483646; -webkit-app-region: drag;
-    }
+    .dsh-native-drag-region { -webkit-app-region: drag; }
+    .dsh-native-drag-region button,
+    .dsh-native-drag-region a,
+    .dsh-native-drag-region input,
+    .dsh-native-drag-region textarea,
+    .dsh-native-drag-region select,
+    .dsh-native-drag-region [role="button"],
+    .dsh-native-drag-region [role="tab"],
+    .dsh-native-drag-region [tabindex] { -webkit-app-region: no-drag; }
     button[data-dsh-update-state] {
       width: 40px !important; height: 40px !important; min-width: 40px !important;
-      padding: 0 !important; border: 0 !important; border-radius: 50% !important;
+      padding: 0 !important; border: 0 !important; border-radius: 0 !important;
       display: grid !important; place-items: center; flex: 0 0 40px;
-      color: rgba(255,255,255,.96) !important; background: #29292c !important;
+      color: rgba(255,255,255,.88) !important; background: transparent !important;
       transform: translateZ(0); -webkit-app-region: no-drag;
-      transition: background-color 120ms var(--ds-ease-out), transform 90ms var(--ds-ease-out), opacity 120ms linear;
+      transition: color 120ms linear, transform 90ms var(--ds-ease-out), opacity 120ms linear;
     }
     button[data-dsh-update-state] svg { width: 20px !important; height: 20px !important; }
     button[data-dsh-update-state="checking"],
     button[data-dsh-update-state="downloading"] { opacity: .68; }
     button[data-dsh-update-state="error"] { color: #ff6b63 !important; }
-    button[data-dsh-update-state]:active:not(:disabled) { transform: scale(.96); }
+    button[data-dsh-update-state]:active:not(:disabled) {
+      border-radius: 50% !important; background: #29292c !important; transform: scale(.96);
+    }
     button[data-dsh-update-state]:focus-visible { outline: 2px solid rgba(255,255,255,.84); outline-offset: 2px; }
     @media (hover: hover) and (pointer: fine) {
-      button[data-dsh-update-state]:hover:not(:disabled) { background: #323236 !important; }
+      button[data-dsh-update-state]:hover:not(:disabled) { color: rgba(255,255,255,1) !important; }
     }
     @media (prefers-reduced-motion: reduce) {
-      button[data-dsh-update-state] { transition: background-color 120ms linear, opacity 120ms linear; }
+      button[data-dsh-update-state] { transition: color 120ms linear, opacity 120ms linear; }
       button[data-dsh-update-state]:active:not(:disabled) { transform: none; }
     }
   `);
@@ -283,17 +289,33 @@ async function injectWindowChrome() {
         window.dshWin.getUpdateState().then(render);
       }
 
+      function bindNativeDragRegion() {
+        var action = Array.from(document.querySelectorAll('button')).find(function (button) {
+          var label = (button.getAttribute('aria-label') || '') + ' ' + (button.textContent || '');
+          return /总结导出|Session log|会话层级/.test(label);
+        });
+        var header = action && action.closest('header');
+        if (!header) {
+          header = Array.from(document.querySelectorAll('header')).find(function (candidate) {
+            return candidate.querySelector('button') && candidate.querySelector('[role="tablist"], [role="tab"]');
+          });
+        }
+        if (!header || header === window.__dshNativeDragTarget) return;
+        if (window.__dshNativeDragTarget) window.__dshNativeDragTarget.classList.remove('dsh-native-drag-region');
+        header.classList.add('dsh-native-drag-region');
+        header.addEventListener('dblclick', function (event) {
+          if (event.target.closest('button, a, input, textarea, select, [role="button"], [role="tab"], [tabindex]')) return;
+          if (window.dshWin) window.dshWin.max();
+        });
+        window.__dshNativeDragTarget = header;
+      }
+
       function ensureChrome() {
         if (!document.body) return;
-        if (!document.querySelector('.dsh-drag-region')) {
-        var drag = document.createElement('div');
-        drag.className = 'dsh-drag-region';
-        drag.setAttribute('aria-hidden', 'true');
-        drag.addEventListener('dblclick', function () { if (window.dshWin) window.dshWin.max(); });
-        document.body.appendChild(drag);
-        }
+        document.querySelector('.dsh-drag-region')?.remove();
         bindSidebarTracker();
         bindUpdateButton();
+        bindNativeDragRegion();
       }
       ensureChrome();
       if (!window.__dshChromeObserver) {

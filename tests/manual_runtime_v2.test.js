@@ -48,9 +48,13 @@ assert.doesNotMatch(controls, /checkUpdate|检查更新/, "the top overlay must 
 assert.doesNotMatch(main, /dsh-update-label/, "the update button must stay icon-only");
 assert.match(main, /width:\s*40px\s*!important/);
 assert.match(main, /height:\s*40px\s*!important/);
-assert.match(main, /border-radius:\s*50%\s*!important/);
-assert.match(main, /button\[data-dsh-update-state\]:active:not\(:disabled\)/);
+assert.match(main, /border-radius:\s*0\s*!important/, "the idle download button must not have a rounded plate");
+assert.match(main, /button\[data-dsh-update-state\]:active:not\(:disabled\)[\s\S]*border-radius:\s*50%\s*!important/, "only the pressed state may show the circular plate");
 assert.match(main, /window\.__dshUpdateUnsubscribe/, "replaced SPA buttons must not leak update listeners");
+assert.doesNotMatch(main, /\.dsh-drag-region\s*\{/, "the shell must not style a visible or transparent top strip");
+assert.doesNotMatch(main, /className\s*=\s*['"]dsh-drag-region/, "the shell must not create a top-strip element");
+assert.match(main, /\.dsh-native-drag-region\s*\{\s*-webkit-app-region:\s*drag/, "the existing header must provide native dragging");
+assert.match(main, /\.dsh-native-drag-region[\s\S]*-webkit-app-region:\s*no-drag/, "header actions must remain clickable");
 
 assert.match(main, /moveTop\(\)/, "notification activation must raise the app on Windows");
 assert.match(main, /taskUrl/, "completion events must keep their destination URL");

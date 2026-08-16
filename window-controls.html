@@ -66,17 +66,27 @@
       if (!button) return;
       button.classList.remove('pressed');
     };
+    const activate = (button) => {
+      if (!button || !window.dshWin) return;
+      release(button);
+      window.dshWin[button.dataset.action]({ reducedMotion });
+    };
 
-    controls.addEventListener('pointerdown', (event) => press(buttonFrom(event), event.pointerId));
-    controls.addEventListener('pointerup', (event) => release(buttonFrom(event)));
+    controls.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      press(buttonFrom(event), event.pointerId);
+    });
+    controls.addEventListener('pointerup', (event) => {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      event.preventDefault();
+      activate(buttonFrom(event));
+    });
     controls.addEventListener('pointercancel', (event) => release(buttonFrom(event)));
     controls.addEventListener('lostpointercapture', (event) => release(buttonFrom(event)));
 
     controls.addEventListener('click', (event) => {
-      const button = buttonFrom(event);
-      if (!button || !window.dshWin) return;
-      release(button);
-      window.dshWin[button.dataset.action]({ reducedMotion });
+      if (event.detail !== 0) return;
+      activate(buttonFrom(event));
     });
   </script>
 </body>

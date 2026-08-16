@@ -56,19 +56,22 @@ function runControls({ reducedMotion = false } = {}) {
 }
 
 const runtime = runControls();
-const event = { pointerId: 7, target: { closest: () => runtime.button } };
+const event = { button: 0, isPrimary: true, pointerId: 7, preventDefault() {}, target: { closest: () => runtime.button } };
 assert.equal(typeof runtime.listeners.get("pointerdown"), "function", "feedback must start on pointerdown");
 assert.equal(typeof runtime.listeners.get("pointerup"), "function", "release must have its own rebound state");
 runtime.listeners.get("pointerdown")(event);
 assert.equal(runtime.button.classList.contains("pressed"), true, "pointerdown must paint a pressed frame");
 runtime.listeners.get("pointerup")(event);
 assert.equal(runtime.button.classList.contains("pressed"), false);
-runtime.listeners.get("click")(event);
 assert.equal(runtime.calls.length, 1);
 assert.equal(runtime.calls[0].reducedMotion, false);
+runtime.listeners.get("click")({ ...event, detail: 1 });
+assert.equal(runtime.calls.length, 1, "the synthetic mouse click must not invoke the action twice");
+runtime.listeners.get("click")({ ...event, detail: 0 });
+assert.equal(runtime.calls.length, 2, "keyboard activation must still work");
 
 const reduced = runControls({ reducedMotion: true });
-reduced.listeners.get("click")({ target: { closest: () => reduced.button } });
+reduced.listeners.get("pointerup")({ button: 0, isPrimary: true, preventDefault() {}, target: { closest: () => reduced.button } });
 assert.equal(reduced.calls.length, 1);
 assert.equal(reduced.calls[0].reducedMotion, true);
 
