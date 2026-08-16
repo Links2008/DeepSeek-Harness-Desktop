@@ -26,7 +26,8 @@ assert.match(main, /isDshBackend/, "an occupied 3080 port must be verified befor
 assert.match(main, /occupied by a non-Harness service/, "foreign services on 3080 must fail clearly instead of being opened");
 assert.doesNotMatch(main, /loadFile\([^)]*loading\.html/, "v2 startup must not show a loading animation or loading page");
 assert.match(main, /const backendPromise = ensureDshBackend\(\);[\s\S]*createWindow\(\);[\s\S]*await backendPromise/, "backend startup and immediate window creation should overlap");
-assert.match(main, /x:\s*4/, "collapsed controls must stay inside the 56px sidebar rail");
+assert.match(main, /CONTROL_COLLAPSED_X\s*=\s*4/, "collapsed controls must stay inside the 56px rail");
+assert.match(main, /CONTROL_Y\s*=\s*3/, "controls must sit slightly lower");
 assert.match(main, /width:\s*48,\s*height:\s*18/, "controls surface must expose three 16px hit targets");
 assert.equal(fs.existsSync(controlsPath), true, "native controls overlay must be packaged");
 const controls = fs.readFileSync(controlsPath, "utf8");

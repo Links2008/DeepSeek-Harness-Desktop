@@ -29,6 +29,9 @@ assert.match(workflow, /resources[\\/]app-update\.yml/, "the installed updater f
 assert.match(workflow, /installer-dist[\\/]latest\.yml/, "release metadata must be checked before publish");
 assert.match(workflow, /SHA512[\s\S]*ComputeHash[\s\S]*latest\.yml/, "the installer hash must match release metadata");
 assert.match(workflow, /installer_sha256[\s\S]*SHA-256/, "each release must publish a human-verifiable installer checksum");
+assert.match(workflow, /version -eq '2\.1\.0'\) \{ 'v2\.1' \}/, "desktop 2.1.0 must publish under the requested v2.1 tag");
+assert.equal((workflow.match(/-eq '2\.1\.0'\) \{ 'v2\.1' \}/g) || []).length, 2, "release inspection and publication must agree on v2.1");
+assert.match(workflow, /release-notes-\$tag\.md/, "the release must load a structured version-specific description");
 assert.match(workflow, /upstream-lock\.json[\s\S]*release\.outputs\.sha/, "the packaged runtime lock must match the selected upstream commit");
 assert.match(verifier, /VersionInfo[\s\S]*FileVersion/, "the installed executable version must match the release");
 assert.match(verifier, /Get-StartApps[\s\S]*com\.deepseek\.dsh/, "the installed shortcut AppID must own notifications");

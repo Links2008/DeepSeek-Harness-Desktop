@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(
 );
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-assert.equal(pkg.version, "2.0.1", "the repaired build must sort after the broken v2.0 release");
+assert.equal(pkg.version, "2.1.0", "the repaired release must publish as v2.1");
 
 assert.doesNotMatch(main, /scheduleAutoUpdates/, "updates must only start from the existing check-update button");
 assert.doesNotMatch(main, /setInterval\s*\(\s*checkForUpdates/);
@@ -27,14 +27,30 @@ assert.match(preload, /checkUpdate/);
 assert.match(preload, /installUpdate/);
 assert.match(preload, /onUpdateState/);
 
-assert.match(main, /width:\s*48,\s*height:\s*18/, "the overlay must contain only the three 16px controls");
-assert.match(main, /\(w - 56\) \/ 224/);
-assert.match(main, /4 \+ 19 \* t/, "controls should move inside the sidebar from x=4 to x=23");
-assert.match(main, /ResizeObserver/, "sidebar animation should be observed from real layout changes");
+assert.match(main, /CONTROL_Y\s*=\s*3/, "the three controls should sit 3px lower");
+assert.match(main, /y:\s*CONTROL_Y,\s*width:\s*48,\s*height:\s*18/);
+assert.match(main, /animateControlsTo/);
+assert.match(main, /CONTROL_MOTION_MS\s*=\s*160/);
+assert.match(main, /setInterval\([\s\S]*?,\s*16\)/, "native view motion should be driven in main at frame cadence");
+assert.match(main, /typeof details\.expanded !== ["']boolean["']/);
+assert.match(preload, /sidebarState/);
+assert.doesNotMatch(preload, /sidebarFrame/);
+assert.doesNotMatch(main, /dshWin\.sidebarFrame\(width\)/, "the renderer must not send every resize frame over IPC");
+assert.match(main, /expanded === lastExpanded/, "sidebar state reports must be deduplicated");
+assert.match(main, /window-control-state\.json/, "cold start must reuse the last sidebar position");
+assert.match(main, /loadControlState\(\)[\s\S]*createWindow\(\)/, "saved control position must load before the window appears");
+assert.match(main, /saveControlState\(details\.expanded\)/);
 assert.doesNotMatch(main, /requestAnimationFrame\(dshTrackSidebar\)/, "an idle infinite animation loop wastes renderer time");
 assert.doesNotMatch(main, /controlsView\.isDestroyed\(\)/, "WebContentsView has no isDestroyed method");
 assert.match(main, /controlsView\.webContents\.isDestroyed\(\)/);
 assert.doesNotMatch(controls, /checkUpdate|检查更新/, "the top overlay must not contain the updater entry");
+
+assert.doesNotMatch(main, /dsh-update-label/, "the update button must stay icon-only");
+assert.match(main, /width:\s*40px\s*!important/);
+assert.match(main, /height:\s*40px\s*!important/);
+assert.match(main, /border-radius:\s*50%\s*!important/);
+assert.match(main, /button\[data-dsh-update-state\]:active:not\(:disabled\)/);
+assert.match(main, /window\.__dshUpdateUnsubscribe/, "replaced SPA buttons must not leak update listeners");
 
 assert.match(main, /moveTop\(\)/, "notification activation must raise the app on Windows");
 assert.match(main, /taskUrl/, "completion events must keep their destination URL");

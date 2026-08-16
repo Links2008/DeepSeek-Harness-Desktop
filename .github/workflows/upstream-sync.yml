@@ -68,7 +68,7 @@ jobs:
           $sha = git -C upstream rev-parse HEAD
           $manifest = Get-Content upstream/package.json -Raw | ConvertFrom-Json
           $desktop = Get-Content package.json -Raw | ConvertFrom-Json
-          $tag = "v$($desktop.version)"
+          $tag = if ($desktop.version -eq '2.1.0') { 'v2.1' } else { "v$($desktop.version)" }
           $releases = @(gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect GitHub Releases' }
           $existing = $releases | Where-Object tag_name -eq $tag | Select-Object -First 1
@@ -248,7 +248,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $version = '${{ steps.desktop.outputs.version }}'
-          $tag = "v$version"
+          $tag = if ($version -eq '2.1.0') { 'v2.1' } else { "v$version" }
           $repo = '${{ github.repository }}'
           $targetCommit = '${{ steps.state.outputs.commit }}'
           $assets = @(
@@ -281,7 +281,13 @@ jobs:
           if ($null -ne $release -and !$release.draft) {
             throw "Refusing to replace already-published release $tag"
           }
-          $notes = "Reason: ${{ steps.release.outputs.reason }}. Includes DeepSeek Harness ${{ steps.release.outputs.upstream_version }} at ${{ steps.release.outputs.sha }}. Installer bytes: ${{ steps.desktop.outputs.installer_bytes }}. SHA-256: ${{ steps.desktop.outputs.installer_sha256 }}. Passed tests, archive and SHA-512 checks, isolated install, AppID, HTTP 200, runtime-version, cleanup, and uninstall checks."
+          $notesPath = "release-notes-$tag.md"
+          $notes = if (Test-Path $notesPath) {
+            Get-Content $notesPath -Raw
+          } else {
+            "Automated desktop release for DeepSeek Harness ${{ steps.release.outputs.upstream_version }}."
+          }
+          $notes += "`n`n## Build verification`n`n- Trigger: ${{ steps.release.outputs.reason }}`n- Harness: ${{ steps.release.outputs.upstream_version }} at `${{ steps.release.outputs.sha }}``n- Installer bytes: ${{ steps.desktop.outputs.installer_bytes }}`n- SHA-256: `${{ steps.desktop.outputs.installer_sha256 }}``n- Passed tests, archive and SHA-512 checks, isolated install, AppID, HTTP 200, runtime-version, cleanup, and uninstall checks."
           if ($null -eq $release) {
             gh release create $tag --repo $repo --target $targetCommit --title "DeepSeek Harness Desktop $tag" --notes $notes --draft
             if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $tag" }

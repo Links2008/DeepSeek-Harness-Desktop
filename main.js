@@ -15,9 +15,15 @@ const {
 const DEV_DSH_DIR = "D:\\deepseek-harness";
 const URL = "http://127.0.0.1:3080";
 const APP_BG = "#121214";
+const CONTROL_COLLAPSED_X = 4;
+const CONTROL_EXPANDED_X = 23;
+const CONTROL_Y = 3;
+const CONTROL_MOTION_MS = 160;
 let dshProc = null;
 let mainWindow = null;
 let controlsView = null;
+let controlsX = CONTROL_COLLAPSED_X;
+let controlsMotionTimer = null;
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -184,34 +190,64 @@ async function injectWindowChrome() {
       left: calc(var(--dsh-sidebar-width) + 120px); right: 400px;
       z-index: 2147483646; -webkit-app-region: drag;
     }
-    button[data-dsh-update-state] .dsh-update-label {
-      margin-left: 8px; white-space: nowrap; font-size: 12px;
+    button[data-dsh-update-state] {
+      width: 40px !important; height: 40px !important; min-width: 40px !important;
+      padding: 0 !important; border: 0 !important; border-radius: 50% !important;
+      display: grid !important; place-items: center; flex: 0 0 40px;
+      color: rgba(255,255,255,.96) !important; background: #29292c !important;
+      transform: translateZ(0); -webkit-app-region: no-drag;
+      transition: background-color 120ms var(--ds-ease-out), transform 90ms var(--ds-ease-out), opacity 120ms linear;
     }
-    button[data-wide="rail"] .dsh-update-label { display: none; }
+    button[data-dsh-update-state] svg { width: 20px !important; height: 20px !important; }
     button[data-dsh-update-state="checking"],
-    button[data-dsh-update-state="downloading"] { opacity: .72; }
-    button[data-dsh-update-state="ready"] { color: #28c840; }
-    button[data-dsh-update-state="error"] { color: #ff5f57; }
+    button[data-dsh-update-state="downloading"] { opacity: .68; }
+    button[data-dsh-update-state="error"] { color: #ff6b63 !important; }
+    button[data-dsh-update-state]:active:not(:disabled) { transform: scale(.96); }
+    button[data-dsh-update-state]:focus-visible { outline: 2px solid rgba(255,255,255,.84); outline-offset: 2px; }
+    @media (hover: hover) and (pointer: fine) {
+      button[data-dsh-update-state]:hover:not(:disabled) { background: #323236 !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      button[data-dsh-update-state] { transition: background-color 120ms linear, opacity 120ms linear; }
+      button[data-dsh-update-state]:active:not(:disabled) { transform: none; }
+    }
   `);
   await mainWindow.webContents.executeJavaScript(`
     (function () {
       function bindSidebarTracker() {
-        if (!window.dshWin || !window.dshWin.sidebarFrame || typeof ResizeObserver === 'undefined') return;
+        if (!window.dshWin || !window.dshWin.sidebarState || typeof ResizeObserver === 'undefined') return;
         var frame = Array.from(document.querySelectorAll('div')).find(function (el) {
           return el.style.gridTemplateColumns && el.style.gridTemplateColumns.indexOf('px') >= 0;
         });
         var sidebar = frame && frame.firstElementChild;
-        if (!sidebar || sidebar === window.__dshSidebarTarget) return;
+        if (!sidebar || (sidebar === window.__dshSidebarTarget && frame === window.__dshSidebarFrame)) return;
         if (window.__dshSidebarResizeObserver) window.__dshSidebarResizeObserver.disconnect();
+        if (window.__dshSidebarMutationObserver) window.__dshSidebarMutationObserver.disconnect();
         window.__dshSidebarTarget = sidebar;
-        var report = function () {
-          var width = Math.round(sidebar.getBoundingClientRect().width * 10) / 10;
+        window.__dshSidebarFrame = frame;
+        var lastExpanded = window.__dshSidebarExpanded;
+        var report = function (width) {
+          width = Math.round(width * 10) / 10;
           document.documentElement.style.setProperty('--dsh-sidebar-width', width + 'px');
-          window.dshWin.sidebarFrame(width);
+          var expanded = width > 168;
+          if (expanded === lastExpanded) return;
+          lastExpanded = expanded;
+          window.__dshSidebarExpanded = expanded;
+          window.dshWin.sidebarState({
+            expanded: expanded,
+            reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+          });
         };
-        window.__dshSidebarResizeObserver = new ResizeObserver(report);
+        var reportMeasured = function () { report(sidebar.getBoundingClientRect().width); };
+        var reportTarget = function () {
+          var width = parseFloat(frame.style.gridTemplateColumns);
+          report(Number.isFinite(width) ? width : sidebar.getBoundingClientRect().width);
+        };
+        window.__dshSidebarResizeObserver = new ResizeObserver(reportMeasured);
         window.__dshSidebarResizeObserver.observe(sidebar);
-        report();
+        window.__dshSidebarMutationObserver = new MutationObserver(reportTarget);
+        window.__dshSidebarMutationObserver.observe(frame, { attributes: true, attributeFilter: ['style', 'class'] });
+        reportTarget();
       }
 
       function updateLabelFor(state) {
@@ -226,18 +262,15 @@ async function injectWindowChrome() {
 
       function bindUpdateButton() {
         if (!window.dshWin || !window.dshWin.checkUpdate) return;
-        var button = document.querySelector('button[aria-label="检查更新"]');
+        var button = document.querySelector('button[data-dsh-update-state], button[aria-label="检查更新"]');
         if (!button || button.__dshUpdateBound) return;
+        if (window.__dshUpdateUnsubscribe) window.__dshUpdateUnsubscribe();
         button.__dshUpdateBound = true;
-        var label = document.createElement('span');
-        label.className = 'dsh-update-label';
-        button.appendChild(label);
         var render = function (state) {
           var text = updateLabelFor(state);
           button.dataset.dshUpdateState = (state && state.status) || 'idle';
           button.setAttribute('aria-label', text);
           button.title = text;
-          label.textContent = text;
           button.disabled = state && (state.status === 'checking' || state.status === 'downloading');
         };
         button.addEventListener('click', function (event) {
@@ -246,7 +279,7 @@ async function injectWindowChrome() {
           if (button.dataset.dshUpdateState === 'ready') window.dshWin.installUpdate();
           else window.dshWin.checkUpdate();
         }, true);
-        window.dshWin.onUpdateState(render);
+        window.__dshUpdateUnsubscribe = window.dshWin.onUpdateState(render);
         window.dshWin.getUpdateState().then(render);
       }
 
@@ -353,18 +386,68 @@ async function createControlsOverlay() {
     },
   });
   controlsView.setBackgroundColor("#00000000");
-  controlsView.setBounds({ x: 4, y: 0, width: 48, height: 18 });
+  controlsView.setBounds({ x: controlsX, y: CONTROL_Y, width: 48, height: 18 });
   mainWindow.contentView.addChildView(controlsView);
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
 
-ipcMain.on("win:sidebar-frame", (event, width) => {
+function controlStatePath() {
+  return path.join(app.getPath("userData"), "window-control-state.json");
+}
+
+function loadControlState() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(controlStatePath(), "utf8"));
+    controlsX = saved.expanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X;
+  } catch (_error) {
+    controlsX = CONTROL_COLLAPSED_X;
+  }
+}
+
+function saveControlState(expanded) {
+  try {
+    fs.writeFileSync(controlStatePath(), JSON.stringify({ expanded: Boolean(expanded) }));
+  } catch (error) {
+    log("control state save failed: " + error.message);
+  }
+}
+
+function stopControlsMotion() {
+  if (controlsMotionTimer) clearInterval(controlsMotionTimer);
+  controlsMotionTimer = null;
+}
+
+function setControlsX(nextX) {
+  if (!controlsView || controlsView.webContents.isDestroyed() || nextX === controlsX) return;
+  controlsX = nextX;
+  controlsView.setBounds({ x: controlsX, y: CONTROL_Y, width: 48, height: 18 });
+}
+
+function animateControlsTo(expanded, reducedMotion) {
+  const targetX = expanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X;
+  stopControlsMotion();
+  if (reducedMotion || targetX === controlsX) {
+    setControlsX(targetX);
+    return;
+  }
+  const startX = controlsX;
+  const startedAt = Date.now();
+  const tick = () => {
+    const progress = Math.min(1, (Date.now() - startedAt) / CONTROL_MOTION_MS);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    setControlsX(Math.round(startX + (targetX - startX) * eased));
+    if (progress === 1) stopControlsMotion();
+  };
+  controlsMotionTimer = setInterval(tick, 16);
+  tick();
+}
+
+ipcMain.on("win:sidebar-state", (event, details) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
   if (!controlsView || controlsView.webContents.isDestroyed()) return;
-  const w = Number(width);
-  if (!Number.isFinite(w)) return;
-  const t = Math.min(1, Math.max(0, (w - 56) / 224));
-  controlsView.setBounds({ x: Math.round(4 + 19 * t), y: 0, width: 48, height: 18 });
+  if (!details || typeof details.expanded !== "boolean") return;
+  saveControlState(details.expanded);
+  animateControlsTo(details.expanded, Boolean(details.reducedMotion));
 });
 
 function updateMaximizedChrome(maximized) {
@@ -397,6 +480,7 @@ function createWindow() {
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
   mainWindow.on("closed", () => {
+    stopControlsMotion();
     mainWindow = null;
     controlsView = null;
     if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
@@ -516,6 +600,7 @@ if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     log("app ready");
+    loadControlState();
     const backendPromise = ensureDshBackend();
     createWindow();
     initializeUpdater();

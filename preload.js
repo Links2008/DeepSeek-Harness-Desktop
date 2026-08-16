@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("dshWin", {
   max: (options) => ipcRenderer.send("win:max", options),
   close: (options) => ipcRenderer.send("win:close", options),
   taskComplete: (details) => ipcRenderer.send("task:complete", details),
-  sidebarFrame: (width) => ipcRenderer.send("win:sidebar-frame", width),
+  sidebarState: (details) => ipcRenderer.send("win:sidebar-state", details),
   checkUpdate: () => ipcRenderer.invoke("app:check-update"),
   installUpdate: () => ipcRenderer.invoke("app:install-update"),
   getUpdateState: () => ipcRenderer.invoke("app:get-update-state"),
