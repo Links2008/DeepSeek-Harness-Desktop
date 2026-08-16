@@ -1,12 +1,12 @@
 {
   "name": "dsh-desktop",
-  "version": "1.1.2",
+  "version": "2.0.1",
   "private": true,
   "description": "Windows desktop shell and one-click installer for DeepSeek Harness",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
-    "test": "node tests/desktop_behavior.test.js && node tests/window_controls_behavior.test.js && node tests/release_policy.test.js && node tests/update_pipeline_behavior.test.js && node tests/workflow_powershell_syntax.test.js && node tests/installer_runtime.test.js && node tests/window_chrome_update.test.js && node tests/repository_branding.test.js",
+    "test": "node tests/desktop_behavior.test.js && node tests/window_controls_behavior.test.js && node tests/release_policy.test.js && node tests/update_pipeline_behavior.test.js && node tests/workflow_powershell_syntax.test.js && node tests/installer_runtime.test.js && node tests/window_chrome_update.test.js && node tests/manual_runtime_v2.test.js && node tests/repository_branding.test.js",
     "build:installer": "electron-builder --config electron-builder.yml --win nsis --x64 --publish never"
   },
   "devDependencies": {

@@ -27,7 +27,6 @@ class FakeClassList {
 
 function runControls({ reducedMotion = false } = {}) {
   const listeners = new Map();
-  const timers = [];
   const calls = [];
   const classList = new FakeClassList();
   const button = {
@@ -43,11 +42,6 @@ function runControls({ reducedMotion = false } = {}) {
   const sandbox = {
     document: { querySelector: () => controls },
     matchMedia: () => ({ matches: reducedMotion }),
-    setTimeout(callback, delay) {
-      timers.push({ callback, delay });
-      return timers.length;
-    },
-    clearTimeout() {},
     window: {
       dshWin: {
         max(options) {
@@ -58,7 +52,7 @@ function runControls({ reducedMotion = false } = {}) {
   };
 
   vm.runInNewContext(script, sandbox);
-  return { button, calls, listeners, timers };
+  return { button, calls, listeners };
 }
 
 const runtime = runControls();
@@ -69,22 +63,12 @@ runtime.listeners.get("pointerdown")(event);
 assert.equal(runtime.button.classList.contains("pressed"), true, "pointerdown must paint a pressed frame");
 runtime.listeners.get("pointerup")(event);
 assert.equal(runtime.button.classList.contains("pressed"), false);
-assert.equal(runtime.button.classList.contains("releasing"), true, "pointerup must paint a rebound frame");
 runtime.listeners.get("click")(event);
-
-const actionTimer = runtime.timers
-  .filter(({ delay }) => delay >= 0 && delay <= 120)
-  .sort((a, b) => a.delay - b.delay)[0];
-assert.ok(actionTimer, "the window action must follow the visible press without a sluggish delay");
-actionTimer.callback();
 assert.equal(runtime.calls.length, 1);
 assert.equal(runtime.calls[0].reducedMotion, false);
 
 const reduced = runControls({ reducedMotion: true });
 reduced.listeners.get("click")({ target: { closest: () => reduced.button } });
-const immediate = reduced.timers.filter(({ delay }) => delay === 0);
-assert.ok(immediate.length > 0, "reduced motion must not add an animation delay");
-for (const timer of immediate) timer.callback();
 assert.equal(reduced.calls.length, 1);
 assert.equal(reduced.calls[0].reducedMotion, true);
 

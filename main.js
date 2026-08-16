@@ -14,10 +14,12 @@ const {
 
 const DEV_DSH_DIR = "D:\\deepseek-harness";
 const URL = "http://127.0.0.1:3080";
-const WIN_RADIUS = 30; // 窗口四角圆角(2026-08-14 用户最终确认:30px)
+const APP_BG = "#121214";
 let dshProc = null;
 let mainWindow = null;
 let controlsView = null;
+let autoUpdater = null;
+let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
 const liveNotifications = new Set();
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -25,10 +27,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
 
 app.on("second-instance", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  if (!mainWindow.isVisible()) mainWindow.show();
-  mainWindow.focus();
+  focusMainWindow();
 });
 
 function log(msg) {
@@ -38,39 +37,53 @@ function log(msg) {
   } catch (e) {}
 }
 
-function scheduleAutoUpdates() {
+function emitUpdateState(next) {
+  updateState = { ...updateState, ...next, current: app.getVersion() };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("app:update-state", updateState);
+  }
+}
+
+function initializeUpdater() {
   if (!app.isPackaged) return;
-  let autoUpdater;
   try {
     ({ autoUpdater } = require("electron-updater"));
   } catch (e) {
     log("updater unavailable: " + e.message);
+    emitUpdateState({ status: "error", message: "更新器不可用" });
     return;
   }
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
   let progressBucket = -1;
-  autoUpdater.on("checking-for-update", () => log("checking for update: current=" + app.getVersion()));
-  autoUpdater.on("update-available", (info) => log("update available: " + info.version));
-  autoUpdater.on("update-not-available", (info) => log("update not available: remote=" + info.version));
+  autoUpdater.on("checking-for-update", () => {
+    log("checking for update: current=" + app.getVersion());
+    emitUpdateState({ status: "checking", percent: 0, message: null });
+  });
+  autoUpdater.on("update-available", (info) => {
+    log("update available: " + info.version);
+    emitUpdateState({ status: "downloading", version: info.version, percent: 0 });
+  });
+  autoUpdater.on("update-not-available", (info) => {
+    log("update not available: remote=" + info.version);
+    emitUpdateState({ status: "current", version: info.version, percent: 100 });
+  });
   autoUpdater.on("download-progress", (info) => {
     const bucket = Math.floor(info.percent / 10) * 10;
     if (bucket === progressBucket) return;
     progressBucket = bucket;
     log("update download progress: " + bucket + "%");
+    emitUpdateState({ status: "downloading", percent: bucket });
   });
   autoUpdater.on("update-downloaded", (info) => {
-    log("update ready for next quit: " + info.version + " file=" + info.downloadedFile);
+    log("update ready: " + info.version + " file=" + info.downloadedFile);
+    emitUpdateState({ status: "ready", version: info.version, percent: 100 });
   });
-  autoUpdater.on("error", (e) => log("update error [" + (e.code || e.name || "Error") + "]: " + e.message));
-  const checkForUpdates = () => autoUpdater.checkForUpdates().catch((e) => {
-    log("update check failed [" + (e.code || e.name || "Error") + "]: " + e.message);
+  autoUpdater.on("error", (e) => {
+    log("update error [" + (e.code || e.name || "Error") + "]: " + e.message);
+    emitUpdateState({ status: "error", message: "检查更新失败，请稍后重试" });
   });
-  const firstCheck = setTimeout(checkForUpdates, 30000);
-  const recurringCheck = setInterval(checkForUpdates, 6 * 60 * 60 * 1000);
-  firstCheck.unref();
-  recurringCheck.unref();
 }
 
 function resolveBackend() {
@@ -94,7 +107,7 @@ function resolveBackend() {
   return null;
 }
 
-function portOpen(port, timeout = 1500) {
+function portOpen(port, timeout = 400) {
   return new Promise((resolve) => {
     const s = net.createConnection({ port, host: "127.0.0.1" }, () => { s.destroy(); resolve(true); });
     s.on("error", () => resolve(false));
@@ -146,9 +159,9 @@ async function ensureDshBackend() {
     dshProc.on("error", (e) => log("spawn error: " + e.message));
     dshProc.on("exit", (c) => log("backend exited code=" + c));
   } catch (e) { log("spawn threw: " + e.message); }
-  for (let i = 0; i < 75; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    if (await portOpen(3080)) { log("backend ready after " + ((i + 1) * 2) + "s"); return true; }
+  for (let i = 0; i < 600; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (await portOpen(3080)) { log("backend ready after " + ((i + 1) * 250) + "ms"); return true; }
   }
   log("backend timeout after 150s");
   return false;
@@ -157,21 +170,86 @@ async function ensureDshBackend() {
 async function injectWindowChrome() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   await mainWindow.webContents.insertCSS(`
-    :root { --dsh-window-radius: ${WIN_RADIUS}px; }
-    html, body { background: transparent !important; }
-    html, body, #root, #app, body > div:first-child {
-      border-radius: var(--dsh-window-radius) !important;
-      overflow: hidden !important;
-      transition: border-radius 160ms cubic-bezier(.23, 1, .32, 1);
+    :root {
+      --dsh-sidebar-width: 56px;
+      --ds-transition-duration-fast: 120ms;
+      --ds-transition-duration-medium: 180ms;
+      --ds-transition-duration-slow: 240ms;
+      --ds-ease-out: cubic-bezier(0, 0, .2, 1);
+      --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
     }
-    body {
-      clip-path: inset(0 round var(--dsh-window-radius));
-      transition: clip-path 160ms cubic-bezier(.23, 1, .32, 1);
+    html, body { background: ${APP_BG} !important; }
+    .dsh-drag-region {
+      position: fixed; top: 0; height: 36px;
+      left: calc(var(--dsh-sidebar-width) + 120px); right: 400px;
+      z-index: 2147483646; -webkit-app-region: drag;
     }
-    .dsh-drag-region { position: fixed; top: 4px; left: 76px; width: 156px; height: 22px; z-index: 2147483646; -webkit-app-region: drag; }
+    button[data-dsh-update-state] .dsh-update-label {
+      margin-left: 8px; white-space: nowrap; font-size: 12px;
+    }
+    button[data-wide="rail"] .dsh-update-label { display: none; }
+    button[data-dsh-update-state="checking"],
+    button[data-dsh-update-state="downloading"] { opacity: .72; }
+    button[data-dsh-update-state="ready"] { color: #28c840; }
+    button[data-dsh-update-state="error"] { color: #ff5f57; }
   `);
   await mainWindow.webContents.executeJavaScript(`
     (function () {
+      function bindSidebarTracker() {
+        if (!window.dshWin || !window.dshWin.sidebarFrame || typeof ResizeObserver === 'undefined') return;
+        var frame = Array.from(document.querySelectorAll('div')).find(function (el) {
+          return el.style.gridTemplateColumns && el.style.gridTemplateColumns.indexOf('px') >= 0;
+        });
+        var sidebar = frame && frame.firstElementChild;
+        if (!sidebar || sidebar === window.__dshSidebarTarget) return;
+        if (window.__dshSidebarResizeObserver) window.__dshSidebarResizeObserver.disconnect();
+        window.__dshSidebarTarget = sidebar;
+        var report = function () {
+          var width = Math.round(sidebar.getBoundingClientRect().width * 10) / 10;
+          document.documentElement.style.setProperty('--dsh-sidebar-width', width + 'px');
+          window.dshWin.sidebarFrame(width);
+        };
+        window.__dshSidebarResizeObserver = new ResizeObserver(report);
+        window.__dshSidebarResizeObserver.observe(sidebar);
+        report();
+      }
+
+      function updateLabelFor(state) {
+        if (!state) return '检查更新';
+        if (state.status === 'checking') return '检查中';
+        if (state.status === 'downloading') return '下载中 ' + (state.percent || 0) + '%';
+        if (state.status === 'ready') return '重启更新';
+        if (state.status === 'current') return '已是最新';
+        if (state.status === 'error') return '重试更新';
+        return '检查更新';
+      }
+
+      function bindUpdateButton() {
+        if (!window.dshWin || !window.dshWin.checkUpdate) return;
+        var button = document.querySelector('button[aria-label="检查更新"]');
+        if (!button || button.__dshUpdateBound) return;
+        button.__dshUpdateBound = true;
+        var label = document.createElement('span');
+        label.className = 'dsh-update-label';
+        button.appendChild(label);
+        var render = function (state) {
+          var text = updateLabelFor(state);
+          button.dataset.dshUpdateState = (state && state.status) || 'idle';
+          button.setAttribute('aria-label', text);
+          button.title = text;
+          label.textContent = text;
+          button.disabled = state && (state.status === 'checking' || state.status === 'downloading');
+        };
+        button.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (button.dataset.dshUpdateState === 'ready') window.dshWin.installUpdate();
+          else window.dshWin.checkUpdate();
+        }, true);
+        window.dshWin.onUpdateState(render);
+        window.dshWin.getUpdateState().then(render);
+      }
+
       function ensureChrome() {
         if (!document.body) return;
         if (!document.querySelector('.dsh-drag-region')) {
@@ -181,6 +259,8 @@ async function injectWindowChrome() {
         drag.addEventListener('dblclick', function () { if (window.dshWin) window.dshWin.max(); });
         document.body.appendChild(drag);
         }
+        bindSidebarTracker();
+        bindUpdateButton();
       }
       ensureChrome();
       if (!window.__dshChromeObserver) {
@@ -201,9 +281,12 @@ async function injectTaskCompletionBridge() {
       const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
       const statusOf = (row) => {
         const label = clean(row.firstElementChild && row.firstElementChild.textContent);
-        if (/^(等待批准|等待回答|计划审核|Waiting for approval|Waiting for answer|Plan review)/i.test(label)) return 'waiting';
-        if (/^(进行中|Running)(?:\\s|$)/i.test(label)) return 'running';
-        if (/^(已完成|Completed)$/i.test(label)) return 'completed';
+        const aria = clean(row.getAttribute && (row.getAttribute('aria-label') || row.getAttribute('data-state')));
+        const text = label + ' ' + aria;
+        if (/(等待批准|等待回答|计划审核|等待输入|Waiting for (?:approval|answer|input)|Plan review)/i.test(text)) return 'waiting';
+        if (/(进行中|运行中|生成中|思考中|Running|Thinking|In progress)/i.test(text)) return 'running';
+        if (/(已完成|完成|已结束|Completed|Done|Finished)/i.test(text)) return 'completed';
+        if (/(失败|出错|已取消|Failed|Error|Cancelled|Canceled)/i.test(text)) return 'failed';
         return 'idle';
       };
       const titleOf = (row, state) => {
@@ -212,24 +295,41 @@ async function injectTaskCompletionBridge() {
         const titleNode = state === 'idle' && first ? children[0] : children[1];
         return clean(titleNode && titleNode.textContent) || 'DeepSeek Harness';
       };
+      const urlOf = (row) => {
+        const link = row.matches && row.matches('a[href]') ? row : row.querySelector && row.querySelector('a[href]');
+        try { return link ? new URL(link.getAttribute('href'), location.href).href : location.href; }
+        catch (_error) { return location.href; }
+      };
       const scan = () => {
         scanQueued = false;
         const counts = new Map();
         const seen = new Set();
-        document.querySelectorAll('[role="treeitem"]:not(button)').forEach((row) => {
+        document.querySelectorAll('[role="treeitem"]:not(button), li[data-state], div[data-state="task"]').forEach((row) => {
           const state = statusOf(row);
           const title = titleOf(row, state);
+          const taskUrl = urlOf(row);
           const occurrence = counts.get(title) || 0;
           counts.set(title, occurrence + 1);
-          const key = title + '::' + occurrence;
+          const stableId = row.id || row.getAttribute('data-id') || row.getAttribute('data-key') || taskUrl;
+          const key = stableId + '::' + title + '::' + occurrence;
           seen.add(key);
           const previous = states.get(key);
-          if (previous === 'running' && (state === 'idle' || state === 'completed')) {
-            window.dshWin && window.dshWin.taskComplete({ key, title });
+          if (previous && (previous.state === 'running' || previous.state === 'waiting') &&
+              (state === 'completed' || state === 'failed')) {
+            window.dshWin && window.dshWin.taskComplete({ key, title, taskUrl });
           }
-          states.set(key, state);
+          states.set(key, { state, title, taskUrl });
         });
-        for (const key of states.keys()) if (!seen.has(key)) states.delete(key);
+        for (const [key, previous] of states) {
+          if (!seen.has(key)) {
+            if (previous.state === 'running' || previous.state === 'waiting') {
+              window.dshWin && window.dshWin.taskComplete({
+                key, title: previous.title, taskUrl: previous.taskUrl,
+              });
+            }
+            states.delete(key);
+          }
+        }
       };
       const queueScan = () => {
         if (scanQueued) return;
@@ -253,17 +353,21 @@ async function createControlsOverlay() {
     },
   });
   controlsView.setBackgroundColor("#00000000");
-  controlsView.setBounds({ x: 23, y: 6, width: 48, height: 18 });
+  controlsView.setBounds({ x: 4, y: 0, width: 48, height: 18 });
   mainWindow.contentView.addChildView(controlsView);
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
 
+ipcMain.on("win:sidebar-frame", (event, width) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  if (!controlsView || controlsView.webContents.isDestroyed()) return;
+  const w = Number(width);
+  if (!Number.isFinite(w)) return;
+  const t = Math.min(1, Math.max(0, (w - 56) / 224));
+  controlsView.setBounds({ x: Math.round(4 + 19 * t), y: 0, width: 48, height: 18 });
+});
+
 function updateMaximizedChrome(maximized) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const radius = maximized ? 0 : WIN_RADIUS;
-  mainWindow.webContents.executeJavaScript(
-    `document.documentElement.style.setProperty('--dsh-window-radius', '${radius}px')`
-  );
   if (controlsView && !controlsView.webContents.isDestroyed()) {
     controlsView.webContents.executeJavaScript(`document.body.classList.toggle('maximized', ${maximized})`).catch(() => {});
   }
@@ -275,9 +379,9 @@ function createWindow() {
     height: 860,
     title: "DeepSeek Harness",
     frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    show: false,
+    transparent: false,
+    backgroundColor: APP_BG,
+    show: true,
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -285,38 +389,13 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
-  let renderReady = false;
-  let chromeReady = false;
-  let controlsReady = false;
-  let revealed = false;
-  const revealWhenReady = () => {
-    if (!revealed && renderReady && chromeReady && controlsReady && mainWindow && !mainWindow.isDestroyed()) {
-      revealed = true;
-      mainWindow.show();
-    }
-  };
-  createControlsOverlay()
-    .catch((e) => log("controls overlay error: " + e.message))
-    .finally(() => { controlsReady = true; revealWhenReady(); });
+  createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
   mainWindow.webContents.on("dom-ready", async () => {
     try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
     try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
-    chromeReady = true;
-    revealWhenReady();
-  });
-  mainWindow.once("ready-to-show", () => {
-    renderReady = true;
-    revealWhenReady();
   });
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
-  mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
-  setTimeout(() => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      log("window reveal fallback");
-      mainWindow.show();
-    }
-  }, 10000);
   mainWindow.on("closed", () => {
     mainWindow = null;
     controlsView = null;
@@ -325,19 +404,38 @@ function createWindow() {
   });
 }
 
-function focusMainWindow() {
+function safeTaskUrl(value) {
+  try {
+    const taskUrl = new URL(value);
+    return taskUrl.origin === new URL(URL).origin ? taskUrl.href : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function focusMainWindow(taskUrl) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.moveTop();
   mainWindow.focus();
+  const target = safeTaskUrl(taskUrl);
+  if (target && mainWindow.webContents.getURL() !== target) {
+    try { await mainWindow.loadURL(taskUrl); }
+    catch (e) { log("notification navigation failed: " + e.message); }
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.moveTop();
+    mainWindow.focus();
+  }
 }
 
-function showTaskCompletionNotification(title) {
+function showTaskCompletionNotification(details = {}) {
   if (!Notification.isSupported()) {
     log("notification skipped: unsupported");
     return;
   }
-  const safeTitle = sanitizeTaskTitle(title);
+  const safeTitle = sanitizeTaskTitle(details.title);
+  const taskUrl = safeTaskUrl(details.taskUrl);
   log("notification attempted");
   const notification = new Notification({
     title: "DeepSeek Harness",
@@ -348,7 +446,7 @@ function showTaskCompletionNotification(title) {
   notification.on("show", () => log("notification shown"));
   notification.on("click", () => {
     log("notification clicked");
-    focusMainWindow();
+    focusMainWindow(taskUrl);
   });
   notification.on("close", () => {
     liveNotifications.delete(notification);
@@ -370,10 +468,36 @@ ipcMain.on("win:max", () => {
   mainWindow[command]();
 });
 ipcMain.on("win:close", () => mainWindow && mainWindow.close());
+ipcMain.handle("app:get-update-state", () => updateState);
+ipcMain.handle("app:check-update", async (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return updateState;
+  if (!app.isPackaged) {
+    emitUpdateState({ status: "error", message: "开发模式不检查更新" });
+    return updateState;
+  }
+  if (!autoUpdater) initializeUpdater();
+  if (!autoUpdater || updateState.status === "checking" || updateState.status === "downloading") return updateState;
+  if (updateState.status === "ready") return updateState;
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (e) {
+    log("update check failed [" + (e.code || e.name || "Error") + "]: " + e.message);
+    emitUpdateState({ status: "error", message: "检查更新失败，请稍后重试" });
+  }
+  return updateState;
+});
+ipcMain.handle("app:install-update", (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
+  if (!autoUpdater || updateState.status !== "ready") return false;
+  log("installing downloaded update");
+  autoUpdater.quitAndInstall(false, true);
+  return true;
+});
 ipcMain.on("task:complete", (event, details = {}) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
   const title = sanitizeTaskTitle(details.title);
   const key = typeof details.key === "string" ? details.key.slice(0, 180) : title;
+  const taskUrl = safeTaskUrl(details.taskUrl);
   const now = Date.now();
   for (const [oldKey, timestamp] of recentCompletionKeys) {
     if (now - timestamp > 30000) recentCompletionKeys.delete(oldKey);
@@ -384,7 +508,7 @@ ipcMain.on("task:complete", (event, details = {}) => {
   if (shouldNotifyTaskCompletion({
     focused: mainWindow.isFocused(),
     minimized: mainWindow.isMinimized(),
-  })) showTaskCompletionNotification(title);
+  })) showTaskCompletionNotification({ title, taskUrl });
   else log("notification skipped: policy");
 });
 
@@ -392,10 +516,11 @@ if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     log("app ready");
+    const backendPromise = ensureDshBackend();
     createWindow();
-    scheduleAutoUpdates();
+    initializeUpdater();
     log("window created");
-    const ok = await ensureDshBackend();
+    const ok = await backendPromise;
     if (!ok) {
       log("backend failed");
       if (mainWindow && !mainWindow.isDestroyed()) {
