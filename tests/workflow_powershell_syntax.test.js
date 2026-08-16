@@ -13,6 +13,12 @@ const scripts = steps.filter((step) => step.shell === "pwsh" && typeof step.run 
 
 assert.ok(scripts.length >= 6, "expected every release phase to expose a PowerShell script");
 
+const publishScript = scripts.find((step) => /publish the verified update/i.test(step.name));
+assert.ok(publishScript, "expected a verified release publication script");
+assert.doesNotMatch(publishScript.run, /``n-/, "Markdown line breaks must not be escaped as literal `n text");
+assert.match(publishScript.run, /\$markdownTick\s*=\s*\[char\]96/);
+assert.match(publishScript.run, /-join\s+\[Environment\]::NewLine/);
+
 for (const step of scripts) {
   const source = step.run.replace(/\$\{\{[\s\S]*?\}\}/g, "GITHUB_VALUE");
   const encoded = Buffer.from(source, "utf16le").toString("base64");

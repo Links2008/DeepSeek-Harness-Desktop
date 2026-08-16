@@ -287,7 +287,19 @@ jobs:
           } else {
             "Automated desktop release for DeepSeek Harness ${{ steps.release.outputs.upstream_version }}."
           }
-          $notes += "`n`n## Build verification`n`n- Trigger: ${{ steps.release.outputs.reason }}`n- Harness: ${{ steps.release.outputs.upstream_version }} at `${{ steps.release.outputs.sha }}``n- Installer bytes: ${{ steps.desktop.outputs.installer_bytes }}`n- SHA-256: `${{ steps.desktop.outputs.installer_sha256 }}``n- Passed tests, archive and SHA-512 checks, isolated install, AppID, HTTP 200, runtime-version, cleanup, and uninstall checks."
+          $markdownTick = [char]96
+          $verificationLines = @(
+            ''
+            ''
+            '## Build verification'
+            ''
+            '- Trigger: ${{ steps.release.outputs.reason }}'
+            "- Harness: ${{ steps.release.outputs.upstream_version }} at ${markdownTick}${{ steps.release.outputs.sha }}${markdownTick}"
+            '- Installer bytes: ${{ steps.desktop.outputs.installer_bytes }}'
+            "- SHA-256: ${markdownTick}${{ steps.desktop.outputs.installer_sha256 }}${markdownTick}"
+            '- Passed tests, archive and SHA-512 checks, isolated install, AppID, HTTP 200, runtime-version, cleanup, and uninstall checks.'
+          )
+          $notes += $verificationLines -join [Environment]::NewLine
           if ($null -eq $release) {
             gh release create $tag --repo $repo --target $targetCommit --title "DeepSeek Harness Desktop $tag" --notes $notes --draft
             if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $tag" }
