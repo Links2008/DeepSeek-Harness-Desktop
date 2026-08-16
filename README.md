@@ -27,16 +27,15 @@ Windows 桌面版 [DeepSeek Harness](https://github.com/deepseek-ai) 客户端 �
 
 ## 安装与升级
 
-从 [Releases](../../releases) 下载 `DeepSeek-Harness-Desktop-v2.0-win-x64.zip`（完整安装包，338 MB），解压到任意目录后运行 `DeepSeekHarness.exe` 即可，无需安装器、无需预装 Node.js。
-
-已有 v1.x 的用户：
+已有 v1.x 安装的用户，从 [Releases](../../releases) 下载 v2.0 的两个附件后：
 
 1. 完全退出 DeepSeek Harness（托盘图标右键退出）
-2. 用解压出的 `DeepSeekHarness` 目录整体覆盖旧安装目录
+2. 备份并替换安装目录下的 `resources\app.asar` 为本版附件 `app.asar`
    （默认安装目录：`C:\Users\<你>\AppData\Local\Programs\DeepSeekHarness`）
-3. 重新启动软件
+3. 将附件 `dsh-runtime-patch-v2.0.zip` 解压，把得到的 `node_modules` 覆盖到 `resources\dsh-runtime\`（仅含 1 个修改过的 UI 布局模块，用于侧边栏默认收纳）
+4. 重新启动软件
 
-包内已内置全部修改：新版 `app.asar`（壳）与补丁后的 `dsh-runtime`（侧边栏默认收纳），无需额外步骤。
+新用户请先安装 DeepSeek Harness 主程序，再执行上述替换。
 
 ## 系统要求
 
