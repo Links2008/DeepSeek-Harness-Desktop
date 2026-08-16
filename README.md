@@ -17,28 +17,25 @@ Windows 桌面版 [DeepSeek Harness](https://github.com/deepseek-ai) 客户端 �
   - `pnpm-workspace.yaml` 中 `allowBuilds` 为 pnpm 生成的占位模板导致 `ERR_PNPM_IGNORED_BUILDS`，cloudflared / cpu-features / ssh2 / sharp 原生模块构建被拒 —— 显式允许构建
   - 自更新后版本校验因 `require` JSON 缓存误报 "verification failed" —— 改为直读 `package.json`
 - **皮肤切换 EPERM 权限错误**：全部皮肤包以真实目录安装进 profile `node_modules`，切换时不再依赖符号链接（绕开 Windows 符号链接权限限制）
-- **皮肤切换后冷启动白屏**：修复切换皮肤时产生的重复 loader 注册（duplicate entry），任何皮肤激活状态下均可正常冷启动
-- **窗口不能拖拽**：修复皮肤全屏层遮挡拖拽区域的问题，标题栏大范围可拖拽移动窗口
-- **消息通知点击无反应**：点击任务完成通知即可将窗口从最小化/后台恢复并前置
-- **任务完成偶发无提示**：扩展任务状态识别词表（生成中/思考中/已完成/失败/取消等），状态转换可靠触发通知
 
 ### 优化
 
 - **冷启动提速**：移除加载页，主窗口立即以应用原色显示，后端在后台就绪后 Web UI 无缝接替
 - **更新自检不阻塞启动**：electron-updater 检查移出冷启动路径，延迟 5 分钟静默后台执行，每 6 小时复查
-- **检查更新按钮**：窗口控制栏新增"检查更新"文字按钮（替代原蓝色圆点指示灯），手动检查 GitHub 最新版本并通过系统通知反馈
 - **宠物功能默认关闭**：可在 设置 > 插件配置 > 宠物 卡片中重新启用
 - **窗口视觉**：12px 四角圆角（最大化时自动归零）、自定义窗口控制按钮（最小化 / 最大化 / 关闭）、拖拽区域与双击最大化
 
 ## 安装与升级
 
-从 [Releases](../../releases) 下载 `DeepSeek-Harness-Desktop-v2.0-win-x64-Setup.exe`，双击运行即可：
+已有 v1.x 安装的用户，从 [Releases](../../releases) 下载 v2.0 的两个附件后：
 
-1. 安装器会自动退出正在运行的旧版本、解压完整程序到 `%LOCALAPPDATA%\Programs\DeepSeekHarness`
-2. 自动创建桌面与开始菜单快捷方式
-3. 弹出安装完成提示后，通过桌面快捷方式启动软件
+1. 完全退出 DeepSeek Harness（托盘图标右键退出）
+2. 备份并替换安装目录下的 `resources\app.asar` 为本版附件 `app.asar`
+   （默认安装目录：`C:\Users\<你>\AppData\Local\Programs\DeepSeekHarness`）
+3. 将附件 `dsh-runtime-patch-v2.0.zip` 解压，把得到的 `node_modules` 覆盖到 `resources\dsh-runtime\`（仅含 1 个修改过的 UI 布局模块，用于侧边栏默认收纳）
+4. 重新启动软件
 
-无需管理员权限，覆盖安装保留用户数据（`~/.dsh` 配置与插件数据不受影响）。
+新用户请先安装 DeepSeek Harness 主程序，再执行上述替换。
 
 ## 系统要求
 
