@@ -28,4 +28,11 @@ assert.match(builder, /createDesktopShortcut:\s*always/);
 assert.match(builder, /deepseek_whale_hermes_rounded\.ico/);
 assert.match(builder, /DeepSeekHarness-Setup-\$\{version\}\.\$\{ext\}/);
 
+const installerNsh = fs.readFileSync(path.join(root, "build", "installer.nsh"), "utf8");
+assert.match(installerNsh, /!macro customInit/);
+assert.match(installerNsh, /!macro customUnInit/);
+assert.match(installerNsh, /!macro customCheckAppRunning/);
+assert.match(installerNsh, /taskkill \/F \/IM "\$\{APP_EXECUTABLE_FILENAME\}" \/T/);
+assert.match(installerNsh, /Get-Process -Name node/, "bundled node backend must be closed by install-dir path match");
+
 console.log("installer runtime configuration verified");
