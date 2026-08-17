@@ -18,7 +18,6 @@
 <p align="center">
   <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载最新版</strong></a>
   · <a href="#v3-更新与优势">v3 更新</a>
-  · <a href="#v21-更新与优势">v2.1 更新</a>
   · <a href="#项目来源与分支谱系">上游来源</a>
   · <a href="#自动更新">自动更新</a>
   · <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/issues">问题反馈</a>
@@ -63,20 +62,6 @@ v3 是一次以「插件生态可用性」为核心的壳层大修：插件商�
 | Mica 修复脚本 `apply-mica-fix.ps1` | 修复云母模式统计栏缓存命中数的显示偏移 | 统计数据与实际命中一致 |
 
 完整变更见 [`v3 Release 说明`](release-notes-v3.md)。
-
-## v2.1 更新与优势
-
-| 更新位置 | v2.1 改动 | 实际优势 |
-| --- | --- | --- |
-| Windows 桌面壳 | 窗口立即显示，不再播放启动页或启动动画 | 冷启动更直接，减少等待感 |
-| 三色窗口控件 | 整体下移 3px，记住侧栏状态，并用 160ms 可中断位移跟随侧栏 | 冷启动与正式界面位置一致，展开和收起不再因逐帧 IPC 卡顿 |
-| 侧栏更新入口 | 原位置改为 40x40px 白色下载 SVG，静止时无底板，只有按下时出现圆形深色底 | 不占文字空间，不把侧栏做成突兀的按钮堆 |
-| Windows 通知 | 保存完成任务的目标 URL，点击通知恢复窗口并返回对应任务 | 不必手动寻找刚完成的会话 |
-| 更新与 Release | 用户主动检查，下载完整 Setup EXE；发布只保留 EXE 与 `latest.yml` | 不再依赖 ZIP 或 app.asar 补丁，升级链路更容易校验和恢复 |
-| Web profile | 主题聚合包 0.1.17、Vision Router 1.3.0，并修复会话总结插件的本机来源 | 减少重复主题加载，图片预处理更快，总结时间线无需 API Key |
-| 标题栏命中区域 | 删除额外透明拖拽条，直接复用现有标题栏空白区域并给所有按钮设置 `no-drag` | 不增加任何细条，同时保留窗口拖动且不遮挡总结导出、模式和 Session log |
-
-完整变更与构建校验见 [`v2.2.1 Release 说明`](release-notes-v2.2.1.md)。
 
 ## 核心能力
 

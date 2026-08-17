@@ -88,6 +88,20 @@ function initializeUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
   let progressBucket = -1;
+  // v2.2.1-r3：更新终态系统通知（用户反馈点击更新无任何提示，此前仅写按钮 tooltip）
+  const notifyUpdate = (title, body) => {
+    if (!Notification.isSupported()) return;
+    try {
+      const n = new Notification({
+        title, body,
+        icon: path.join(__dirname, "deepseek_whale_hermes_rounded.png"),
+      });
+      n.on("click", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+      });
+      n.show();
+    } catch (e) { log("update notification failed: " + e.message); }
+  };
   autoUpdater.on("checking-for-update", () => {
     log("checking for update: current=" + app.getVersion());
     emitUpdateState({ status: "checking", percent: 0, message: null });
@@ -95,10 +109,12 @@ function initializeUpdater() {
   autoUpdater.on("update-available", (info) => {
     log("update available: " + info.version);
     emitUpdateState({ status: "downloading", version: info.version, percent: 0 });
+    notifyUpdate("发现新版本 " + info.version, "正在后台自动下载…");
   });
   autoUpdater.on("update-not-available", (info) => {
     log("update not available: remote=" + info.version);
     emitUpdateState({ status: "current", version: info.version, percent: 100 });
+    notifyUpdate("DeepSeek Harness 已是最新", "当前版本 " + info.version + "，无需更新");
   });
   autoUpdater.on("download-progress", (info) => {
     const bucket = Math.floor(info.percent / 10) * 10;
@@ -110,10 +126,12 @@ function initializeUpdater() {
   autoUpdater.on("update-downloaded", (info) => {
     log("update ready: " + info.version + " file=" + info.downloadedFile);
     emitUpdateState({ status: "ready", version: info.version, percent: 100 });
+    notifyUpdate("新版本 " + info.version + " 已就绪", "点击侧栏「重启更新」按钮立即安装");
   });
   autoUpdater.on("error", (e) => {
     log("update error [" + (e.code || e.name || "Error") + "]: " + e.message);
     emitUpdateState({ status: "error", message: "检查更新失败，请稍后重试" });
+    notifyUpdate("检查更新失败", String(e.message || "请稍后重试").slice(0, 120));
   });
 }
 
@@ -180,19 +198,126 @@ async function ensureDshBackend() {
   }
   const backend = resolveBackend();
   if (!backend) { log("bundled backend runtime is missing"); return false; }
+  // v2.2.1-gate：后端 stdout/stderr 汇流写入 dsh_backend.log（每次启动截断，
+  // 旧文件先重命名为 .prev；约 2MB 上限，超出后停止写入；出错静默降级）
+  const backendLogPath = path.join(app.getPath("userData"), "dsh_backend.log");
+  const BACKEND_LOG_LIMIT = 2 * 1024 * 1024;
+  let backendLogClosed = false;
   try {
-    dshProc = spawn(
-      backend.command,
-      backend.args,
-      { cwd: backend.cwd, windowsHide: true, stdio: "ignore" }
-    );
-    log("spawned backend pid=" + dshProc.pid);
-    dshProc.on("error", (e) => log("spawn error: " + e.message));
-    dshProc.on("exit", (c) => log("backend exited code=" + c));
-  } catch (e) { log("spawn threw: " + e.message); }
+    if (fs.existsSync(backendLogPath)) {
+      try { fs.renameSync(backendLogPath, backendLogPath + ".prev"); } catch (e) {}
+    }
+    fs.writeFileSync(backendLogPath, `[${new Date().toISOString()}] dsh backend log start\n`);
+  } catch (e) { backendLogClosed = true; }
+  let backendLogSize = 0;
+  try { backendLogSize = fs.statSync(backendLogPath).size; } catch (e) {}
+  const appendBackendLog = (label, chunk) => {
+    if (backendLogClosed) return;
+    try {
+      const text = `[${label}] ` + chunk.toString();
+      if (backendLogSize + Buffer.byteLength(text) > BACKEND_LOG_LIMIT) {
+        backendLogClosed = true;
+        fs.appendFileSync(backendLogPath, "\n[dsh-desktop] log size limit reached, further output dropped\n");
+        return;
+      }
+      backendLogSize += Buffer.byteLength(text);
+      fs.appendFileSync(backendLogPath, text);
+    } catch (e) { backendLogClosed = true; }
+  };
+  let backendReady = false;
+  let respawned = false;
+  // v2.2.1-r7：插件安装/卸载后自动刷新 Web UI。插件装卸会改写 profile 的
+// package.json / cordis.patch.yml 并增删 node_modules 顶层目录；监听这些变化，
+// 防抖 3 秒合并成一次页面 reload（client 插件脚本由后端 serve，reload 即重新
+// 拉取；后端 loader 的 host 半部装卸在后端进程内动态生效）。商店自身的
+// allowRestart 已在 cordis.patch.yml 关闭，重启/刷新职责归壳层。
+let pluginReloadTimer = null;
+function watchProfileChanges() {
+  const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+  const queueReload = (why) => {
+    log("profile change detected (" + why + "), reload queued");
+    if (pluginReloadTimer) clearTimeout(pluginReloadTimer);
+    pluginReloadTimer = setTimeout(() => {
+      pluginReloadTimer = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        log("reloading web UI after plugin change");
+        mainWindow.webContents.reload();
+      }
+    }, 3000);
+  };
+  try {
+    ["package.json", "cordis.patch.yml"].forEach((name) => {
+      fs.watchFile(path.join(profileDir, name), { interval: 2000 }, (curr, prev) => {
+        if (curr.mtimeMs !== prev.mtimeMs) queueReload(name);
+      });
+    });
+    fs.watch(path.join(profileDir, "node_modules"), { persistent: false }, (event, filename) => {
+      if (filename) queueReload("node_modules/" + filename);
+    });
+    log("profile watcher armed");
+  } catch (e) {
+    log("profile watcher failed: " + e.message);
+  }
+}
+
+const startBackend = (attempt) => {
+    try {
+      dshProc = spawn(
+        backend.command,
+        backend.args,
+        { cwd: backend.cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }
+      );
+      log("spawned backend pid=" + dshProc.pid + " attempt=" + attempt);
+      const spawnStartedAt = Date.now();
+      let firstOutputAt = null;
+      let readyKeywordAt = null;
+      const onOutput = (label) => (chunk) => {
+        if (firstOutputAt === null) {
+          firstOutputAt = Date.now();
+          log("backend first-output after " + (firstOutputAt - spawnStartedAt) + "ms");
+        }
+        appendBackendLog(label, chunk);
+        if (readyKeywordAt === null && /\b(listening|started|ready)\b/i.test(chunk.toString())) {
+          readyKeywordAt = Date.now();
+          log("backend ready-keyword after " + (readyKeywordAt - spawnStartedAt) + "ms");
+        }
+      };
+      if (dshProc.stdout) dshProc.stdout.on("data", onOutput("stdout"));
+      if (dshProc.stderr) dshProc.stderr.on("data", onOutput("stderr"));
+      dshProc.on("error", (e) => log("spawn error: " + e.message));
+      dshProc.on("exit", (c) => {
+        log("backend exited code=" + c);
+        if (!backendReady && c !== 0 && !respawned) {
+          respawned = true;
+          log("backend respawn attempt=1");
+          startBackend(2);
+        }
+      });
+    } catch (e) { log("spawn threw: " + e.message); }
+  };
+  startBackend(1);
+  const startedAt = Date.now();
+  let lastLoadingUpdateMs = 0;
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 250));
-    if (await portOpen(3080)) { log("backend ready after " + ((i + 1) * 250) + "ms"); return true; }
+    if (await portOpen(3080)) {
+      backendReady = true;
+      log("backend ready after " + ((i + 1) * 250) + "ms");
+      return true;
+    }
+    // v2.2.1-gate：loading 页文案附加已耗时秒数；超过 60 秒提示可能被杀毒软件拖慢
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs - lastLoadingUpdateMs >= 1000 && mainWindow && !mainWindow.isDestroyed()) {
+      lastLoadingUpdateMs = elapsedMs;
+      const seconds = Math.floor(elapsedMs / 1000);
+      const slowHint = seconds > 60 ? "，启动较慢，可能被杀毒软件扫描拖慢" : "";
+      mainWindow.webContents.executeJavaScript(`
+        (function () {
+          var detail = document.querySelector('[data-detail]');
+          if (detail) detail.textContent = '首次启动可能需要约一分钟，已等待 ' + ${seconds} + ' 秒' + ${JSON.stringify(slowHint)};
+        })();
+      `).catch(() => {});
+    }
   }
   log("backend timeout after 150s");
   return false;
@@ -202,7 +327,6 @@ async function injectWindowChrome() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   await mainWindow.webContents.insertCSS(`
     :root {
-      --dsh-sidebar-width: 56px;
       --ds-transition-duration-fast: 120ms;
       --ds-transition-duration-medium: 180ms;
       --ds-transition-duration-slow: 240ms;
@@ -258,15 +382,26 @@ async function injectWindowChrome() {
         var lastExpanded = window.__dshSidebarExpanded;
         var report = function (width) {
           width = Math.round(width * 10) / 10;
-          document.documentElement.style.setProperty('--dsh-sidebar-width', width + 'px');
-          var expanded = width > 168;
-          if (expanded === lastExpanded) return;
-          lastExpanded = expanded;
-          window.__dshSidebarExpanded = expanded;
-          window.dshWin.sidebarState({
-            expanded: expanded,
-            reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-          });
+          // v2.2.1-r5：滞回+消抖。better-sidebar 接管侧栏后宽度在 168px 阈值附近
+          // 抖动，壳层窗口控件位置（23px<->4px）来回弹跳。滞回带 [152,184]：
+          // 越过上沿算展开、跌破下沿算收起，带内保持原状态；变化延迟 250ms 确认。
+          var pendingTimer = null;
+          var next = width > 184 ? true : width < 152 ? false : lastExpanded;
+          if (next === lastExpanded) {
+            if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+            return;
+          }
+          if (pendingTimer) clearTimeout(pendingTimer);
+          pendingTimer = setTimeout(function () {
+            pendingTimer = null;
+            if (next === lastExpanded) return;
+            lastExpanded = next;
+            window.__dshSidebarExpanded = next;
+            window.dshWin.sidebarState({
+              expanded: next,
+              reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+            });
+          }, 250);
         };
         var reportMeasured = function () { report(sidebar.getBoundingClientRect().width); };
         var reportTarget = function () {
@@ -357,60 +492,152 @@ async function injectDesktopTweaks() {
     [data-dsh-taskboard-entry],
     [data-dsh-taskboard-board],
     [data-dsh-taskboard-view] { display: none !important; }
-    /* v2.2：云母模式下会话框底下的命中数据栏过宽时 margin:0 auto 失效、向右偏移；
-       改用 left:50% + translateX 强制水平居中，窄内容时与原布局等价 */
+    /* v2.2：云母模式下会话框底下的命中数据栏右偏：aqua 主题给该元素加了
+       position:relative，left:50%+translateX 叠加产生净右偏；改为 left:0 清除
+       相对偏移，用 margin auto + 定宽 width 居中，窄窗口不再压扁栏体 */
+    /* v2.2.1-r3：设置对话框内 Web UI 插件卡片默认收起（抽屉化），点卡片首行展开 */
+    [data-dsh-drawer] { cursor: pointer; }
+    [data-dsh-drawer][data-dsh-collapsed] > *:not(:first-child) { display: none !important; }
+    /* v2.2.1-r5：顶级商店条目（SSH 正下方，低频轮询注入）。收起态纯图标居中 */
+    [data-dsh-store-entry][data-dsh-icon] { padding: 8px 0 !important; justify-content: center !important; gap: 0 !important; }
+    [data-dsh-store-entry][data-dsh-icon] > span { display: none !important; }
     [data-dsh-float] [data-dsh-stats] {
-      left: 50% !important;
-      transform: translateX(-50%) !important;
-      margin-left: 0 !important;
-      margin-right: 0 !important;
-      max-width: calc(100% - 32px) !important;
+      left: 0 !important;
+      transform: none !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+      width: min(calc(var(--dsh-chat-content-width) + 32px), calc(100% - 32px)) !important;
+      max-width: 100% !important;
     }
   `);
   await mainWindow.webContents.executeJavaScript(`
     (function () {
-      if (window.__dshStoreEntryBound) return;
-      window.__dshStoreEntryBound = true;
-      function sidebarRoot() {
-        var column = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]');
-        if (!column) return null;
-        var logo = column.querySelector('[class*="logoRow"]');
-        return logo ? logo.parentElement : column.firstElementChild;
+      if (window.__dshSettingsCollapseBound) return;
+      window.__dshSettingsCollapseBound = true;
+      // v2.2.1-r3：设置对话框的 Web UI 插件分区卡片默认收起。前端无原生折叠机制，
+      // 锚点用标题文案（/web ui/i）+ 结构（ul/subcards 子项），不依赖哈希类名。
+      function collapseCard(card) {
+        if (card.dataset.dshDrawer !== undefined) return;
+        if (!card.children || card.children.length <= 1) return;
+        card.dataset.dshDrawer = '';
+        card.dataset.dshCollapsed = '';
+        var header = card.firstElementChild;
+        header.addEventListener('click', function (e) {
+          if (e.target.closest('[data-dsh-drawer]') !== card) return;
+          if (e.target.closest('button, input, select, textarea, a, [role="switch"], [role="button"]')) return;
+          if (card.dataset.dshCollapsed !== undefined) delete card.dataset.dshCollapsed;
+          else card.dataset.dshCollapsed = '';
+        });
+      }
+      function processDialog(dialog) {
+        var headings = Array.prototype.slice.call(dialog.querySelectorAll('h2, h3'));
+        headings.forEach(function (h) {
+          if (!/web ui/i.test(h.textContent || '')) return;
+          var section = h.parentElement;
+          if (!section || section.dataset.dshDrawerSection !== undefined) return;
+          section.dataset.dshDrawerSection = '';
+          var list = section.querySelector('ul, [class*="subcards"], [class*="sectionList"]');
+          var cards = list ? Array.prototype.slice.call(list.children)
+            : Array.prototype.slice.call(section.children).filter(function (el) {
+                return el !== h && el.tagName !== 'P';
+              });
+          cards.forEach(collapseCard);
+        });
+      }
+      function scan() {
+        var dialogs = document.querySelectorAll('div[role="dialog"]');
+        Array.prototype.forEach.call(dialogs, processDialog);
+      }
+      scan();
+      new MutationObserver(function () { queueMicrotask(scan); })
+        .observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  `);
+  await mainWindow.webContents.executeJavaScript(`
+    (function () {
+      // v2.2.1-r5：顶级商店入口（SSH 正下方）回归。改用低频轮询（2.5s）而非
+      // MutationObserver：better-sidebar 高频重写侧栏 DOM，观察器会与之形成
+      // 正反馈（r3 崩溃根因）；轮询只在条目脱链时补插一次，不监听 DOM 变化。
+      if (window.__dshStorePollTimer) clearInterval(window.__dshStorePollTimer);
+      function sidebarColumn() {
+        return document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]');
+      }
+      function findSshButton() {
+        var scopes = [sidebarColumn(), document];
+        for (var i = 0; i < scopes.length; i++) {
+          if (!scopes[i]) continue;
+          var btn = Array.prototype.slice.call(scopes[i].querySelectorAll('button')).find(function (b) {
+            var label = (b.getAttribute('aria-label') || '').trim();
+            var text = (b.textContent || '').trim();
+            return label === 'SSH' || text === 'SSH';
+          });
+          if (btn) return btn;
+        }
+        return null;
       }
       function openStore() {
-        var settingsButton = Array.prototype.find.call(
-          document.querySelectorAll('button'),
-          function (b) { return (b.getAttribute('aria-label') || '').trim() === '设置'; }
-        );
-        if (settingsButton) settingsButton.click();
-        setTimeout(function () {
-          var tab = Array.prototype.find.call(
-            document.querySelectorAll('button'),
-            function (b) { return (b.textContent || '').trim() === 'DSH插件市场'; }
-          );
-          if (tab) tab.click();
+        function findSettingsButton() {
+          var column = sidebarColumn();
+          var matches = column
+            ? Array.prototype.slice.call(column.querySelectorAll('button[aria-haspopup="dialog"]'))
+            : [];
+          if (matches.length === 0) {
+            matches = Array.prototype.slice.call(document.querySelectorAll('button[aria-haspopup="dialog"]'));
+          }
+          if (matches.length === 0) return null;
+          return matches.slice().sort(function (a, b) {
+            return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
+          })[0];
+        }
+        function findMarketplaceTab(scope) {
+          var candidates = Array.prototype.slice.call((scope || document).querySelectorAll('[role="tab"], button'));
+          var labels = ['插件市场', 'Plugin Market', 'DSH插件市场', 'DSH Plugin Marketplace'];
+          for (var i = 0; i < labels.length; i++) {
+            var found = candidates.find(function (b) { return (b.textContent || '').trim() === labels[i]; });
+            if (found) return found;
+          }
+          return candidates.find(function (b) { return /插件市场|plugin\\s*market/i.test((b.textContent || '').trim()); });
+        }
+        function tryClickMarketplaceTab() {
+          var dialog = document.querySelector('div[role="dialog"][aria-modal="true"]') || document.querySelector('[role="dialog"]');
+          if (!dialog) return false;
+          var tab = findMarketplaceTab(dialog);
+          if (!tab) return false;
+          tab.click();
+          return true;
+        }
+        if (tryClickMarketplaceTab()) return;
+        var settingsButton = findSettingsButton();
+        if (!settingsButton) return;
+        settingsButton.click();
+        var tries = 0;
+        var timer = setInterval(function () {
+          if (tryClickMarketplaceTab() || ++tries > 20) clearInterval(timer);
         }, 250);
       }
       function ensureStoreEntry() {
-        var root = sidebarRoot();
-        if (!root) return;
-        if (document.querySelector('[data-dsh-store-entry]')) return;
+        var existing = document.querySelector('[data-dsh-store-entry]');
+        if (existing && existing.isConnected) {
+          var col = sidebarColumn();
+          var w = col ? col.getBoundingClientRect().width : 320;
+          if (w > 0 && w < 72) existing.dataset.dshIcon = '';
+          else delete existing.dataset.dshIcon;
+          return;
+        }
+        var sshBtn = findSshButton();
+        if (!sshBtn || !sshBtn.parentElement) return;
         var entry = document.createElement('button');
         entry.type = 'button';
         entry.dataset.dshStoreEntry = '';
         entry.setAttribute('aria-label', '插件商店');
         entry.title = '插件商店';
-        entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
-        entry.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
+        entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;min-height:36px;box-sizing:border-box;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
+        entry.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
         entry.addEventListener('click', openStore);
-        var anchor = root.querySelector('[data-dsh-ssh-entry]') ||
-                     root.querySelector('button[class*="newSession"]');
-        if (anchor && anchor.parentElement === root) root.insertBefore(entry, anchor.nextElementSibling);
-        else root.appendChild(entry);
+        sshBtn.parentElement.insertBefore(entry, sshBtn.nextSibling);
       }
       ensureStoreEntry();
-      new MutationObserver(function () { queueMicrotask(ensureStoreEntry); })
-        .observe(document.documentElement, { childList: true, subtree: true });
+      window.__dshStorePollTimer = setInterval(ensureStoreEntry, 2500);
     })();
   `);
 }
@@ -507,7 +734,9 @@ function applyRuntimePatches() {
   try {
     const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
     const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
-    const changed = patchHarnessRuntime(runtimeRoot, profileDir);
+    const changed = patchHarnessRuntime(runtimeRoot, profileDir, {
+      onFailure: (message) => log("runtime compatibility " + message),
+    });
     log("runtime compatibility: " + (changed.join(",") || "already patched"));
   } catch (e) {
     log("runtime compatibility failed: " + e.message);
@@ -691,6 +920,7 @@ ipcMain.handle("app:check-update", async (event) => {
   } catch (e) {
     log("update check failed [" + (e.code || e.name || "Error") + "]: " + e.message);
     emitUpdateState({ status: "error", message: "检查更新失败，请稍后重试" });
+    notifyUpdate("检查更新失败", String(e.message || "请稍后重试").slice(0, 120));
   }
   return updateState;
 });
@@ -726,6 +956,7 @@ if (hasSingleInstanceLock) {
     log("app ready");
     loadControlState();
     healOrphanedSettingsLock();
+    watchProfileChanges();
     applyRuntimePatches();
     const backendPromise = ensureDshBackend();
     createWindow();
