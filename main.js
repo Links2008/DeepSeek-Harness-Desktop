@@ -227,39 +227,6 @@ async function ensureDshBackend() {
   };
   let backendReady = false;
   let respawned = false;
-  // v2.2.1-r7：插件安装/卸载后自动刷新 Web UI。插件装卸会改写 profile 的
-// package.json / cordis.patch.yml 并增删 node_modules 顶层目录；监听这些变化，
-// 防抖 3 秒合并成一次页面 reload（client 插件脚本由后端 serve，reload 即重新
-// 拉取；后端 loader 的 host 半部装卸在后端进程内动态生效）。商店自身的
-// allowRestart 已在 cordis.patch.yml 关闭，重启/刷新职责归壳层。
-let pluginReloadTimer = null;
-function watchProfileChanges() {
-  const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
-  const queueReload = (why) => {
-    log("profile change detected (" + why + "), reload queued");
-    if (pluginReloadTimer) clearTimeout(pluginReloadTimer);
-    pluginReloadTimer = setTimeout(() => {
-      pluginReloadTimer = null;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        log("reloading web UI after plugin change");
-        mainWindow.webContents.reload();
-      }
-    }, 3000);
-  };
-  try {
-    ["package.json", "cordis.patch.yml"].forEach((name) => {
-      fs.watchFile(path.join(profileDir, name), { interval: 2000 }, (curr, prev) => {
-        if (curr.mtimeMs !== prev.mtimeMs) queueReload(name);
-      });
-    });
-    fs.watch(path.join(profileDir, "node_modules"), { persistent: false }, (event, filename) => {
-      if (filename) queueReload("node_modules/" + filename);
-    });
-    log("profile watcher armed");
-  } catch (e) {
-    log("profile watcher failed: " + e.message);
-  }
-}
 
 const startBackend = (attempt) => {
     try {
@@ -322,6 +289,40 @@ const startBackend = (attempt) => {
   }
   log("backend timeout after 150s");
   return false;
+}
+
+  // v2.2.1-r7：插件安装/卸载后自动刷新 Web UI。插件装卸会改写 profile 的
+// package.json / cordis.patch.yml 并增删 node_modules 顶层目录；监听这些变化，
+// 防抖 3 秒合并成一次页面 reload（client 插件脚本由后端 serve，reload 即重新
+// 拉取；后端 loader 的 host 半部装卸在后端进程内动态生效）。商店自身的
+// allowRestart 已在 cordis.patch.yml 关闭，重启/刷新职责归壳层。
+let pluginReloadTimer = null;
+function watchProfileChanges() {
+  const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+  const queueReload = (why) => {
+    log("profile change detected (" + why + "), reload queued");
+    if (pluginReloadTimer) clearTimeout(pluginReloadTimer);
+    pluginReloadTimer = setTimeout(() => {
+      pluginReloadTimer = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        log("reloading web UI after plugin change");
+        mainWindow.webContents.reload();
+      }
+    }, 3000);
+  };
+  try {
+    ["package.json", "cordis.patch.yml"].forEach((name) => {
+      fs.watchFile(path.join(profileDir, name), { interval: 2000 }, (curr, prev) => {
+        if (curr.mtimeMs !== prev.mtimeMs) queueReload(name);
+      });
+    });
+    fs.watch(path.join(profileDir, "node_modules"), { persistent: false }, (event, filename) => {
+      if (filename) queueReload("node_modules/" + filename);
+    });
+    log("profile watcher armed");
+  } catch (e) {
+    log("profile watcher failed: " + e.message);
+  }
 }
 
 async function injectWindowChrome() {

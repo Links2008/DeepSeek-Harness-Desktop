@@ -82,7 +82,18 @@ try {
       }
     } catch {}
   }
-  if (!$ready) { throw 'Installed runtime did not return the expected HTTP 200 page' }
+  if (!$ready) {
+    foreach ($logName in @('dsh_desktop.log', 'dsh_backend.log')) {
+      $logPath = Join-Path $env:APPDATA "DeepSeekHarness\$logName"
+      if (Test-Path -LiteralPath $logPath) {
+        Write-Host "----- tail of $logName -----"
+        Get-Content -LiteralPath $logPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
+      } else {
+        Write-Host "----- missing $logName (app never wrote it) -----"
+      }
+    }
+    throw 'Installed runtime did not return the expected HTTP 200 page'
+  }
   $accepted = $true
 } finally {
   Stop-InstalledProcesses $installRoot
