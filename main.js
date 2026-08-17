@@ -25,6 +25,7 @@ let mainWindow = null;
 let controlsView = null;
 let controlsX = CONTROL_COLLAPSED_X;
 let controlsMotionTimer = null;
+let lastExpanded = null;
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -798,6 +799,10 @@ ipcMain.on("win:sidebar-state", (event, details) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
   if (!controlsView || controlsView.webContents.isDestroyed()) return;
   if (!details || typeof details.expanded !== "boolean") return;
+  // 侧栏状态上报在主进程侧同样去重：渲染层滞回+消抖已合并重复帧，
+  // 若仍有重复状态漏到这里，跳过多余的控件动画与磁盘写入。
+  if (details.expanded === lastExpanded) return;
+  lastExpanded = details.expanded;
   saveControlState(details.expanded);
   animateControlsTo(details.expanded, Boolean(details.reducedMotion));
 });
