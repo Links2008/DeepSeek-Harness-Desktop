@@ -42,6 +42,13 @@ v3 聚焦插件生态可用性与界面稳定：插件商店升为顶级入口�
 - 已安装 v2.x 的用户：下载 Release 中的完整压缩包覆盖安装目录，或仅覆盖 `resources\app.asar`（Web profile 的改动在首次启动时自动生效）。
 - 安装包暂无商业代码签名，SmartScreen 可能提示「未知发布者」：更多信息 → 仍要运行；Release 说明中可核对 SHA-256。
 
+## 资产校验（SHA-256）
+
+| 资产 | SHA-256 |
+| --- | --- |
+| `app.asar` | `37f52937b3eff4996d409f8d59727ccdbfd4235edb8d89f2d1ed660450a447e6` |
+| `DeepSeekHarness-v3-win-x64.zip` | `47138ad09ea487ff94222d184b5f58b83e1ad1f446a09679305406f2326829bf` |
+
 ## 已知限制
 - 话题侧栏总结需在设置中配置 DeepSeek API Key 后可用。
 - 浏览器下载安装包可能触发信誉警告（未签名 + 低下载量所致），属误报。
