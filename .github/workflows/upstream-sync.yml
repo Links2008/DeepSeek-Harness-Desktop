@@ -68,7 +68,7 @@ jobs:
           $sha = git -C upstream rev-parse HEAD
           $manifest = Get-Content upstream/package.json -Raw | ConvertFrom-Json
           $desktop = Get-Content package.json -Raw | ConvertFrom-Json
-          $tag = if ($desktop.version -eq '2.1.0') { 'v2.1' } else { "v$($desktop.version)" }
+          $tag = if ($desktop.version -eq '2.1.0') { 'v2.1' } elseif ($desktop.version -eq '2.2.0') { 'v2.2' } else { "v$($desktop.version)" }
           $releases = @(gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect GitHub Releases' }
           $existing = $releases | Where-Object tag_name -eq $tag | Select-Object -First 1
@@ -93,11 +93,13 @@ jobs:
             throw "Published release $tag is incomplete; refusing to mutate a live update"
           }
           $head = git rev-parse HEAD
+          $publishedOthers = @($releases | Where-Object { !$_.draft -and $_.tag_name -ne $tag })
           $policy = @{
             currentReleaseReady = [bool]$releaseReady
             upstreamChanged = $sha -ne $lock.commit
             desktopPush = '${{ github.event_name }}' -eq 'push' -and $head -eq '${{ github.sha }}'
             force = '${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.force }}' -eq 'true'
+            authorBumped = ($null -eq $existing) -and $publishedOthers.Count -gt 0
           } | ConvertTo-Json -Compress
           $decision = node scripts/release-policy.cjs $policy
           if ($LASTEXITCODE -ne 0) { throw 'Release policy failed' }
@@ -248,7 +250,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $version = '${{ steps.desktop.outputs.version }}'
-          $tag = if ($version -eq '2.1.0') { 'v2.1' } else { "v$version" }
+          $tag = if ($version -eq '2.1.0') { 'v2.1' } elseif ($version -eq '2.2.0') { 'v2.2' } else { "v$version" }
           $repo = '${{ github.repository }}'
           $targetCommit = '${{ steps.state.outputs.commit }}'
           $assets = @(

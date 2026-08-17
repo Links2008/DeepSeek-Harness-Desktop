@@ -7,7 +7,9 @@ function decideRelease(input = {}) {
     return { shouldBuild: true, bump: true, reason: "upstream-change" };
   }
   if (input.desktopPush === true) {
-    return { shouldBuild: true, bump: true, reason: "desktop-change" };
+    // 作者已在提交里手动 bump 版本（如 v2.2.0）时不再二次 bump，
+    // 保证发布 tag 与作者声明的版本一致。
+    return { shouldBuild: true, bump: input.authorBumped !== true, reason: "desktop-change" };
   }
   if (input.force === true) {
     return { shouldBuild: true, bump: true, reason: "forced" };

@@ -5,6 +5,7 @@ const net = require("net");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { patchHarnessRuntime } = require("./scripts/patch-harness-runtime.cjs");
 const {
   APP_ID,
   nextMaximizeCommand,
@@ -41,6 +42,30 @@ function log(msg) {
     const logFile = path.join(app.getPath("userData"), "dsh_desktop.log");
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch (e) {}
+}
+
+// v2.2：设置持久化层（dsh-atomic-write）用 <file>.lock 串行化跨进程写入，且从不
+// 删除别人的锁（孤儿恢复是运维动作）。后端崩溃会留下 settings.yaml.lock，导致
+// 之后所有设置写入（主题切换等）超时回滚。启动时检测锁内 PID，若已死亡则清理。
+function healOrphanedSettingsLock() {
+  try {
+    const lockPath = path.join(app.getPath("home"), ".dsh", "settings.yaml.lock");
+    if (!fs.existsSync(lockPath)) return;
+    const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      fs.unlinkSync(lockPath);
+      log("removed invalid settings lock");
+      return;
+    }
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      fs.unlinkSync(lockPath);
+      log("healed orphaned settings.yaml.lock (dead pid=" + pid + ")");
+    }
+  } catch (e) {
+    log("settings lock heal failed: " + e.message);
+  }
 }
 
 function emitUpdateState(next) {
@@ -184,7 +209,6 @@ async function injectWindowChrome() {
       --ds-ease-out: cubic-bezier(0, 0, .2, 1);
       --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
     }
-    html, body { background: ${APP_BG} !important; }
     .dsh-native-drag-region { -webkit-app-region: drag; }
     .dsh-native-drag-region button,
     .dsh-native-drag-region a,
@@ -326,6 +350,71 @@ async function injectWindowChrome() {
   `);
 }
 
+async function injectDesktopTweaks() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await mainWindow.webContents.insertCSS(`
+    /* v2.2：用户要求移除一级菜单的任务看板（插件入口与看板视图一并隐藏） */
+    [data-dsh-taskboard-entry],
+    [data-dsh-taskboard-board],
+    [data-dsh-taskboard-view] { display: none !important; }
+    /* v2.2：云母模式下会话框底下的命中数据栏过宽时 margin:0 auto 失效、向右偏移；
+       改用 left:50% + translateX 强制水平居中，窄内容时与原布局等价 */
+    [data-dsh-float] [data-dsh-stats] {
+      left: 50% !important;
+      transform: translateX(-50%) !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      max-width: calc(100% - 32px) !important;
+    }
+  `);
+  await mainWindow.webContents.executeJavaScript(`
+    (function () {
+      if (window.__dshStoreEntryBound) return;
+      window.__dshStoreEntryBound = true;
+      function sidebarRoot() {
+        var column = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]');
+        if (!column) return null;
+        var logo = column.querySelector('[class*="logoRow"]');
+        return logo ? logo.parentElement : column.firstElementChild;
+      }
+      function openStore() {
+        var settingsButton = Array.prototype.find.call(
+          document.querySelectorAll('button'),
+          function (b) { return (b.getAttribute('aria-label') || '').trim() === '设置'; }
+        );
+        if (settingsButton) settingsButton.click();
+        setTimeout(function () {
+          var tab = Array.prototype.find.call(
+            document.querySelectorAll('button'),
+            function (b) { return (b.textContent || '').trim() === 'DSH插件市场'; }
+          );
+          if (tab) tab.click();
+        }, 250);
+      }
+      function ensureStoreEntry() {
+        var root = sidebarRoot();
+        if (!root) return;
+        if (document.querySelector('[data-dsh-store-entry]')) return;
+        var entry = document.createElement('button');
+        entry.type = 'button';
+        entry.dataset.dshStoreEntry = '';
+        entry.setAttribute('aria-label', '插件商店');
+        entry.title = '插件商店';
+        entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
+        entry.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
+        entry.addEventListener('click', openStore);
+        var anchor = root.querySelector('[data-dsh-ssh-entry]') ||
+                     root.querySelector('button[class*="newSession"]');
+        if (anchor && anchor.parentElement === root) root.insertBefore(entry, anchor.nextElementSibling);
+        else root.appendChild(entry);
+      }
+      ensureStoreEntry();
+      new MutationObserver(function () { queueMicrotask(ensureStoreEntry); })
+        .observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  `);
+}
+
 async function injectTaskCompletionBridge() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   await mainWindow.webContents.executeJavaScript(`
@@ -413,6 +502,18 @@ async function createControlsOverlay() {
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
 
+function applyRuntimePatches() {
+  if (!app.isPackaged) return;
+  try {
+    const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
+    const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+    const changed = patchHarnessRuntime(runtimeRoot, profileDir);
+    log("runtime compatibility: " + (changed.join(",") || "already patched"));
+  } catch (e) {
+    log("runtime compatibility failed: " + e.message);
+  }
+}
+
 function controlStatePath() {
   return path.join(app.getPath("userData"), "window-control-state.json");
 }
@@ -497,6 +598,7 @@ function createWindow() {
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
   mainWindow.webContents.on("dom-ready", async () => {
     try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
+    try { await injectDesktopTweaks(); } catch (e) { log("desktop tweaks error: " + e.message); }
     try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
   });
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
@@ -623,6 +725,8 @@ if (hasSingleInstanceLock) {
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     log("app ready");
     loadControlState();
+    healOrphanedSettingsLock();
+    applyRuntimePatches();
     const backendPromise = ensureDshBackend();
     createWindow();
     initializeUpdater();

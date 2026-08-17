@@ -20,6 +20,11 @@ assert.deepEqual(decideRelease({ ...ready, desktopPush: true }), {
   bump: true,
   reason: "desktop-change",
 });
+assert.deepEqual(decideRelease({ ...ready, desktopPush: true, authorBumped: true }), {
+  shouldBuild: true,
+  bump: false,
+  reason: "desktop-change",
+});
 assert.deepEqual(decideRelease({ ...ready, force: true }), {
   shouldBuild: true,
   bump: true,

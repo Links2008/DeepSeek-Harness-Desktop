@@ -10,6 +10,7 @@ files:
   - loading.html
   - deepseek_whale_hermes_rounded.png
   - package.json
+  - scripts/patch-harness-runtime.cjs
 extraResources:
   - from: bundle/node/node.exe
     to: node/node.exe
