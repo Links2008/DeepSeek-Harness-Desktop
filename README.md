@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载最新版</strong></a>
+  · <a href="#v3-更新与优势">v3 更新</a>
   · <a href="#v21-更新与优势">v2.1 更新</a>
   · <a href="#项目来源与分支谱系">上游来源</a>
   · <a href="#自动更新">自动更新</a>
@@ -42,6 +43,26 @@
     <td align="center">紧凑侧栏与沉浸工作区</td>
   </tr>
 </table>
+
+## v3 更新与优势
+
+v3 是一次以「插件生态可用性」为核心的壳层大修：插件商店升为顶级入口、插件装卸链路修复、界面抖动根除、冷启动治理，并预装 better-sidebar 侧栏增强。升级位置与改动如下：
+
+| 更新位置 | v3 改动 | 实际优势 |
+| --- | --- | --- |
+| 桌面壳 `main.js`（插件商店入口） | 侧边栏 SSH 按钮正下方新增「插件商店」条目，点击直达插件市场页；低频轮询补插（2.5s），不用 MutationObserver | 商店从设置深层提为顶级入口，且与第三方侧栏插件互不冲突、不再崩溃 |
+| 桌面壳 `main.js`（收起侧栏适配） | 侧栏收起时商店条目切换为纯图标居中显示 | 与原生图标列对齐，无文字溢出 |
+| 桌面壳 `main.js`（更新通知） | autoUpdater 检查/下载/安装事件接入 Windows 系统通知，点击通知聚焦主窗口 | 点更新按钮后不再无反馈，下载完成与可安装状态一目了然 |
+| 桌面壳 `main.js`（弹跳根除） | 删除壳层对 `--dsh-sidebar-width` 的逐帧写入与默认值（与 better-sidebar 撞名的死代码）；窗口控件位置加 152–184px 滞回带 + 250ms 消抖 | 界面不再左右弹跳，侧栏动画期间控件稳定 |
+| 桌面壳 `main.js`（设置抽屉） | 设置对话框各卡片默认收起，点卡片头部展开 | 设置页不再满屏长列表 |
+| Web profile（商店切换） | 插件市场由 `dsh-plugin-marketplace` 切换为 `dshmarket@1.11.1`，关闭其自重启（`allowRestart: false`） | 浏览/搜索/一键安装社区插件，重启职责统一归壳层 |
+| Web profile（插件更新修复） | `pnpm-workspace.yaml` 设 `minimumReleaseAge: 0`，解除 24h 发布冷静期对新版插件的拦截 | 插件检查更新可正常装上新版本 |
+| Web profile（冷启动治理） | 禁用启动即崩溃循环的灵枢 `dsh-memory` 插件；该循环每次启动阻塞插件加载 0.5–2s | 冷启动明显提速，后端日志不再刷崩溃栈 |
+| Web profile（默认关闭项） | 宠物、任务看板、皮肤中心默认关闭（loader 补丁层，可随时恢复）；移除 Vision Router | 界面聚焦对话，无关组件不抢启动时间 |
+| Web profile（文件栏唯一化） | 禁用 dsh-web-ui 自带的 aionui 文件列，保留 better-sidebar 的 Explorer 文件树 | 只保留一个文件侧栏，不再两套重叠 |
+| Mica 修复脚本 `apply-mica-fix.ps1` | 修复云母模式统计栏缓存命中数的显示偏移 | 统计数据与实际命中一致 |
+
+完整变更见 [`v3 Release 说明`](release-notes-v3.md)。
 
 ## v2.1 更新与优势
 
