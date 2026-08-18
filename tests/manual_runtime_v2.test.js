@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(
 );
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-assert.equal(pkg.version, "3.1.1", "the release must publish as v3.1.1");
+assert.equal(pkg.version, "3.1.2", "the release must publish as v3.1.2");
 
 assert.doesNotMatch(main, /scheduleAutoUpdates/, "updates must only start from the existing check-update button");
 assert.doesNotMatch(main, /setInterval\s*\(\s*checkForUpdates/);

@@ -971,7 +971,18 @@ function createWindow() {
     stopControlsMotion();
     mainWindow = null;
     controlsView = null;
-    if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
+    // v3.1.2-fix：Windows 上 dshProc.kill() 仅 kill 主进程，子进程（node、pnpm）
+    // 可能存活持有端口 3080。用 taskkill /F /T 杀死整个进程树，确保干净退出。
+    if (dshProc) {
+      try {
+        const pid = dshProc.pid;
+        if (pid) {
+          try { process.kill(pid); } catch (e) {}
+          try { spawn("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true, stdio: "ignore" }); } catch (e) {}
+        }
+      } catch (e) {}
+      dshProc = null;
+    }
     app.quit();
   });
 }
@@ -1063,6 +1074,22 @@ ipcMain.handle("app:install-update", (event) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
   if (!autoUpdater || updateState.status !== "ready") return false;
   log("installing downloaded update");
+  // v3.1.2-fix：用户反馈"更新时无法关闭"。根因是 quitAndInstall 调用
+  // app.quit() 后，mainWindow.on("closed") 中的 dshProc.kill() 在 Windows
+  // 上仅 kill 主进程，子进程（node、pnpm）可能存活持有端口 3080，导致
+  // NSIS 安装程序覆盖文件失败 + 新版本启动端口冲突。这里在 quitAndInstall
+  // 前用 taskkill /F /T 同步杀死整个进程树，确保干净退出。
+  try {
+    if (dshProc && !dshProc.killed) {
+      const pid = dshProc.pid;
+      if (pid) {
+        try { process.kill(pid); } catch (e) {}
+        // Windows 上用 taskkill /F /T 杀死整个进程树
+        try { spawn("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true, stdio: "ignore" }); } catch (e) {}
+      }
+      dshProc = null;
+    }
+  } catch (e) { log("install-update cleanup failed: " + e.message); }
   autoUpdater.quitAndInstall(false, true);
   return true;
 });
@@ -1127,6 +1154,15 @@ if (hasSingleInstanceLock) {
 
 app.on("window-all-closed", () => {
   try { globalShortcut.unregisterAll(); } catch (e) {}
-  if (dshProc) { try { dshProc.kill(); } catch (e) {} }
+  if (dshProc) {
+    try {
+      const pid = dshProc.pid;
+      if (pid) {
+        try { process.kill(pid); } catch (e) {}
+        try { spawn("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true, stdio: "ignore" }); } catch (e) {}
+      }
+    } catch (e) {}
+    dshProc = null;
+  }
   app.quit();
 });
