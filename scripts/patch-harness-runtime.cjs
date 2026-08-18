@@ -50,25 +50,16 @@ function patchConversation(source) {
   return replaceOnce(source, "\t\t\t\t\tdocument.removeEventListener(\"dragenter\", onDragEnter);", "\t\t\t\t\tdocument.removeEventListener(\"dsh:image-files\", onImageFiles);\n\t\t\t\t\tdocument.removeEventListener(\"dragenter\", onDragEnter);", "conversation bridge cleanup");
 }
 
-function patchAion(source) {
-  source = source.replace("\t\t\t\t\t\tconst actx = sessions.scope(sessionId);\n\t\t\t\t\t\tconst root = actx?.session?.cwd ?? ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;", "\t\t\t\t\t\tconst root = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;");
-  source = replaceOnce(source, "\t\tconst FILE_DRAG_MIME = \"application/x-dsh-file\";", `\t\tconst FILE_DRAG_MIME = "application/x-dsh-file";
-\t\tfunction dispatchImageFiles(dataUrl, path) {
-\t\t\tconst comma = dataUrl.indexOf(",");
-\t\t\tif (comma < 0) return false;
-\t\t\tconst meta = dataUrl.slice(0, comma);
-\t\t\tconst mime = /^data:([^;]+)/.exec(meta)?.[1] ?? "application/octet-stream";
-\t\t\tconst binary = atob(dataUrl.slice(comma + 1));
-\t\t\tconst bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-\t\t\tconst blob = new Blob([bytes], { type: mime });
-\t\t\tconst file = new File([blob], path.split("/").pop() ?? "image", { type: mime });
-\t\t\tdocument.dispatchEvent(new CustomEvent("dsh:image-files", { detail: { files: [file] } }));
-\t\t\treturn true;
-\t\t}`, "Aion image bridge helper");
-  source = replaceOnce(source, "\t\t\t\t\tif (path !== \"\") props.insertPath(path);", "\t\t\t\t\tif (path !== \"\" && detectContentType(path) === \"image\" && props.insertImage !== void 0) void props.insertImage(path);\n\t\t\t\t\telse if (path !== \"\") props.insertPath(path);", "Aion image drop routing");
-  return replaceOnce(source, "\t\t\t\t\tinject: (sessionId) => ({ insertPath: (path) => {", "\t\t\t\t\tinject: (sessionId) => ({ insertImage: async (path) => {\n\t\t\t\t\t\tif (sessionId === void 0) return false;\n\t\t\t\t\t\tconst root = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd;\n\t\t\t\t\t\tif (typeof root !== \"string\" || root === \"\") return false;\n\t\t\t\t\t\tconst result = await new PanelApi().read(root, path, true);\n\t\t\t\t\t\treturn result.ok && typeof result.value.content === \"string\" ? dispatchImageFiles(result.value.content, path) : false;\n\t\t\t\t\t}, insertPath: (path) => {", "Aion image loader");
+function patchAquaSlotKey(source) {
+	// upstream slots 0.1.0-rc.7 起 settings.plugin.item 为 keyed slot（注册需 options.key）；
+	// marketplace 安装的 aqua 1.3.0 仍按旧 list API 以 id 注册，加载即抛
+	// keyed slot "settings.plugin.item" requires options.key。改为 key 注册；
+	// aqua 升级为官方 keyed 形态后锚点消失，本补丁自动跳过。
+	const before = 'name: "settings.plugin.item",\n				id: "aqua",';
+	const after = 'name: "settings.plugin.item",\n				key: "aqua",';
+	if (source.includes(after) || !source.includes(before)) return source;
+	return source.replace(before, after);
 }
-
 function patchMinimalPreset(source) {
   if (/^\s*- id: compaction\s*$/m.test(source)) return source;
   source = source.replace("Context compaction is absent.", "Context compaction is mounted internally without changing the two-tool model surface.");
@@ -106,17 +97,30 @@ function reconcileClientOnlyPlugins(profileDir) {
   return activated;
 }
 
-function patchHarnessRuntime(runtimeRoot, profileDir) {
+function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
+  const onFailure = typeof options.onFailure === "function" ? options.onFailure : null;
   const modules = path.join(runtimeRoot, "node_modules");
   const changed = [];
-  const apply = (label, file, transform) => { if (patchFile(file, transform)) changed.push(label); };
+  // v3.1：单补丁锚点漂移只跳过该补丁并上报（onFailure），不再中断整链——
+  // 此前 theme 锚点一变，后面的 aqua-slot-key 等修复全部失效。
+  const apply = (label, file, transform) => {
+    try {
+      if (patchFile(file, transform)) changed.push(label);
+    } catch (error) {
+      if (onFailure) onFailure(`${label}: ${error.message}`);
+    }
+  };
   apply("theme", path.join(modules, "@deepseek-ai", "dsh-client-ui-theme", "lib", "client.js"), patchTheme);
   apply("compaction", path.join(modules, "@deepseek-ai", "dsh-compaction-basic", "lib", "index.js"), patchCompaction);
   apply("conversation", path.join(modules, "@deepseek-ai", "dsh-client-ui-conversation", "lib", "client.js"), patchConversation);
   apply("minimal-compaction", path.join(modules, "@deepseek-ai", "dsh", "config", "agent-presets", "minimal", "agent.cordis.yml"), patchMinimalPreset);
   if (profileDir) {
-    apply("aion-image-drop", path.join(profileDir, "node_modules", "@linxin666", "dsh-client-ui-aionui-panel", "lib", "client.js"), patchAion);
-    changed.push(...reconcileClientOnlyPlugins(profileDir).map((name) => `activate:${name}`));
+    apply("aqua-slot-key", path.join(profileDir, "node_modules", "@deepseek-ai", "dsh-client-ui-aqua", "lib", "client.js"), patchAquaSlotKey);
+    try {
+      changed.push(...reconcileClientOnlyPlugins(profileDir).map((name) => `activate:${name}`));
+    } catch (error) {
+      if (onFailure) onFailure(`activate-client-plugins: ${error.message}`);
+    }
   }
   return changed;
 }
@@ -127,4 +131,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAion, patchMinimalPreset, reconcileClientOnlyPlugins };
+module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, reconcileClientOnlyPlugins };

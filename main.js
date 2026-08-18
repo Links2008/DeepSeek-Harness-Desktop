@@ -270,6 +270,7 @@ const startBackend = (attempt) => {
     await new Promise((r) => setTimeout(r, 250));
     if (await portOpen(3080)) {
       backendReady = true;
+      backendReadyAt = Date.now();
       log("backend ready after " + ((i + 1) * 250) + "ms");
       return true;
     }
@@ -291,35 +292,57 @@ const startBackend = (attempt) => {
   return false;
 }
 
-  // v2.2.1-r7：插件安装/卸载后自动刷新 Web UI。插件装卸会改写 profile 的
-// package.json / cordis.patch.yml 并增删 node_modules 顶层目录；监听这些变化，
-// 防抖 3 秒合并成一次页面 reload（client 插件脚本由后端 serve，reload 即重新
-// 拉取；后端 loader 的 host 半部装卸在后端进程内动态生效）。商店自身的
-// allowRestart 已在 cordis.patch.yml 关闭，重启/刷新职责归壳层。
+  // v3.1：插件安装/卸载后自动刷新 Web UI。只 stat 轮询 package.json 与
+// cordis.patch.yml 两个清单并做内容摘要比对；不再 fs.watch node_modules——
+// pnpm 安装期的事件风暴曾把冷启动拖到 40s+ 并引发 ERR_ABORTED 重载循环
+// （侧栏打不开、设置按键失灵均为重载吞点击的表象）。防护：后端就绪前
+// 不重载；5s 静默合并；两次重载至少间隔 15s。
 let pluginReloadTimer = null;
+let lastPluginReloadAt = 0;
+let backendReadyAt = 0;
+const profileDigests = new Map();
+function profileDigest(file) {
+  try {
+    return require("node:crypto").createHash("sha1").update(fs.readFileSync(file)).digest("hex");
+  } catch (_error) {
+    return null;
+  }
+}
 function watchProfileChanges() {
   const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
   const queueReload = (why) => {
+    if (!backendReadyAt) {
+      log("profile change before backend ready ignored (" + why + ")");
+      return;
+    }
     log("profile change detected (" + why + "), reload queued");
     if (pluginReloadTimer) clearTimeout(pluginReloadTimer);
     pluginReloadTimer = setTimeout(() => {
       pluginReloadTimer = null;
+      if (Date.now() - lastPluginReloadAt < 15000) {
+        log("plugin reload skipped: rate limited");
+        return;
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
+        lastPluginReloadAt = Date.now();
         log("reloading web UI after plugin change");
         mainWindow.webContents.reload();
       }
-    }, 3000);
+    }, 5000);
   };
   try {
     ["package.json", "cordis.patch.yml"].forEach((name) => {
-      fs.watchFile(path.join(profileDir, name), { interval: 2000 }, (curr, prev) => {
-        if (curr.mtimeMs !== prev.mtimeMs) queueReload(name);
+      const file = path.join(profileDir, name);
+      profileDigests.set(name, profileDigest(file));
+      fs.watchFile(file, { interval: 2500 }, () => {
+        const digest = profileDigest(file);
+        if (digest !== profileDigests.get(name)) {
+          profileDigests.set(name, digest);
+          queueReload(name);
+        }
       });
     });
-    fs.watch(path.join(profileDir, "node_modules"), { persistent: false }, (event, filename) => {
-      if (filename) queueReload("node_modules/" + filename);
-    });
-    log("profile watcher armed");
+    log("profile watcher armed (manifest digests)");
   } catch (e) {
     log("profile watcher failed: " + e.message);
   }
@@ -344,27 +367,32 @@ async function injectWindowChrome() {
     .dsh-native-drag-region [role="button"],
     .dsh-native-drag-region [role="tab"],
     .dsh-native-drag-region [tabindex] { -webkit-app-region: no-drag; }
-    button[data-dsh-update-state] {
-      width: 40px !important; height: 40px !important; min-width: 40px !important;
-      padding: 0 !important; border: 0 !important; border-radius: 0 !important;
-      display: grid !important; place-items: center; flex: 0 0 40px;
-      color: rgba(255,255,255,.88) !important; background: transparent !important;
+    /* v3.1：侧栏底部"检查更新"与"移动端远程控制"两枚按钮统一规格
+       （36px 圆形幽灵按钮、同一颜色 token、flex 行对齐；此前更新钮被
+       强制 40px 白色而远程钮保持插件原生 36px 灰色，大小颜色均不一致） */
+    [data-dsh-entry-row] { display: flex !important; align-items: center !important; gap: 2px !important; }
+    [data-dsh-entry-row] > button {
+      width: 36px !important; height: 36px !important; min-width: 36px !important; max-width: 36px !important;
+      padding: 0 !important; border: 0 !important; border-radius: 50% !important; margin: 0 !important;
+      display: inline-flex !important; align-items: center !important; justify-content: center !important;
+      flex: 0 0 36px !important;
+      color: var(--dsw-alias-label-secondary, rgba(255,255,255,.72)) !important;
+      background: transparent !important;
       transform: translateZ(0); -webkit-app-region: no-drag;
-      transition: color 120ms linear, transform 90ms var(--ds-ease-out), opacity 120ms linear;
+      transition: color 120ms linear, background-color 120ms linear, transform 90ms var(--ds-ease-out);
     }
-    button[data-dsh-update-state] svg { width: 20px !important; height: 20px !important; }
+    [data-dsh-entry-row] > button svg { width: 18px !important; height: 18px !important; }
+    [data-dsh-entry-row] > button:hover:not(:disabled) {
+      background: var(--dsw-alias-interactive-bg-hover, rgba(255,255,255,.10)) !important;
+      color: var(--dsw-alias-label-primary, rgba(255,255,255,1)) !important;
+    }
     button[data-dsh-update-state="checking"],
     button[data-dsh-update-state="downloading"] { opacity: .68; }
     button[data-dsh-update-state="error"] { color: #ff6b63 !important; }
-    button[data-dsh-update-state]:active:not(:disabled) {
-      border-radius: 50% !important; background: #29292c !important; transform: scale(.96);
-    }
+    button[data-dsh-update-state]:active:not(:disabled) { transform: scale(.96); }
     button[data-dsh-update-state]:focus-visible { outline: 2px solid rgba(255,255,255,.84); outline-offset: 2px; }
-    @media (hover: hover) and (pointer: fine) {
-      button[data-dsh-update-state]:hover:not(:disabled) { color: rgba(255,255,255,1) !important; }
-    }
     @media (prefers-reduced-motion: reduce) {
-      button[data-dsh-update-state] { transition: color 120ms linear, opacity 120ms linear; }
+      [data-dsh-entry-row] > button { transition: color 120ms linear, background-color 120ms linear; }
       button[data-dsh-update-state]:active:not(:disabled) { transform: none; }
     }
   `);
@@ -430,7 +458,10 @@ async function injectWindowChrome() {
       function bindUpdateButton() {
         if (!window.dshWin || !window.dshWin.checkUpdate) return;
         var button = document.querySelector('button[data-dsh-update-state], button[aria-label="检查更新"]');
-        if (!button || button.__dshUpdateBound) return;
+        if (!button) return;
+        var row = button.parentElement;
+        if (row && row.dataset.dshEntryRow === undefined) row.dataset.dshEntryRow = '';
+        if (button.__dshUpdateBound) return;
         if (window.__dshUpdateUnsubscribe) window.__dshUpdateUnsubscribe();
         button.__dshUpdateBound = true;
         var render = function (state) {
@@ -636,6 +667,11 @@ async function injectDesktopTweaks() {
         entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;min-height:36px;box-sizing:border-box;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
         entry.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
         entry.addEventListener('click', openStore);
+        // v3.0.1：收起态下新建时直接以纯图标插入，避免先渲染中文文字、
+        // 再等下一轮轮询（最长 2.5s）才切成图标。
+        var colNow = sidebarColumn();
+        var wNow = colNow ? colNow.getBoundingClientRect().width : 320;
+        if (wNow > 0 && wNow < 72) entry.dataset.dshIcon = '';
         sshBtn.parentElement.insertBefore(entry, sshBtn.nextSibling);
       }
       ensureStoreEntry();
@@ -962,13 +998,15 @@ if (hasSingleInstanceLock) {
     log("app ready");
     loadControlState();
     healOrphanedSettingsLock();
-    watchProfileChanges();
     applyRuntimePatches();
     const backendPromise = ensureDshBackend();
     createWindow();
     initializeUpdater();
     log("window created");
     const ok = await backendPromise;
+    // v3.1：后端就绪后再挂清单监视器（启动期 pnpm 自检不再触发重载）。
+    // 更新检查仍只由用户点击侧栏按钮发起（见 tests/manual_runtime_v2.test.js 契约）。
+    watchProfileChanges();
     if (!ok) {
       log("backend failed");
       if (mainWindow && !mainWindow.isDestroyed()) {

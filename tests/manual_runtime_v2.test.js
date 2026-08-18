@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(
 );
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-assert.equal(pkg.version, "3.0.0", "the release must publish as v3.0.0");
+assert.equal(pkg.version, "3.1.0", "the release must publish as v3.1.0");
 
 assert.doesNotMatch(main, /scheduleAutoUpdates/, "updates must only start from the existing check-update button");
 assert.doesNotMatch(main, /setInterval\s*\(\s*checkForUpdates/);
@@ -46,10 +46,10 @@ assert.match(main, /controlsView\.webContents\.isDestroyed\(\)/);
 assert.doesNotMatch(controls, /checkUpdate|检查更新/, "the top overlay must not contain the updater entry");
 
 assert.doesNotMatch(main, /dsh-update-label/, "the update button must stay icon-only");
-assert.match(main, /width:\s*40px\s*!important/);
-assert.match(main, /height:\s*40px\s*!important/);
-assert.match(main, /border-radius:\s*0\s*!important/, "the idle download button must not have a rounded plate");
-assert.match(main, /button\[data-dsh-update-state\]:active:not\(:disabled\)[\s\S]*border-radius:\s*50%\s*!important/, "only the pressed state may show the circular plate");
+assert.match(main, /dataset\.dshEntryRow/, "the plugin rail row must be tagged so both buttons share one spec");
+assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?width:\s*36px\s*!important/, "rail buttons share one width");
+assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?height:\s*36px\s*!important/, "rail buttons share one height");
+assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?border-radius:\s*50%\s*!important/, "rail buttons are circular ghost buttons");
 assert.match(main, /window\.__dshUpdateUnsubscribe/, "replaced SPA buttons must not leak update listeners");
 assert.doesNotMatch(main, /\.dsh-drag-region\s*\{/, "the shell must not style a visible or transparent top strip");
 assert.doesNotMatch(main, /className\s*=\s*['"]dsh-drag-region/, "the shell must not create a top-strip element");

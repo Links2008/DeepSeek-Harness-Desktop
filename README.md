@@ -24,7 +24,7 @@
 </p>
 
 > [!IMPORTANT]
-> 这是由 [Links2008](https://github.com/Links2008) 维护的**非官方 Windows 桌面发行版**。DeepSeek Harness 核心来自 [DeepSeek-AI 官方仓库](https://github.com/deepseek-ai/deepseek-harness)；本仓库不代表 DeepSeek-AI 官方桌面客户端。
+> 如果你觉得本项目对你有帮助，请点 ⭐ Star 支持一下，对项目曝光很重要。
 
 ## 产品预览
 
