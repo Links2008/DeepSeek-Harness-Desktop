@@ -16,7 +16,7 @@
 
 - **侧栏退出键失灵 (Bug #13)**：新增 `bindQuitButton()` 拦截 click + `stopImmediatePropagation`；注册 Ctrl+Q 全局快捷键兜底。
 
-- **更新时无法关闭 (Bug #15)**：quitAndInstall 前用 `taskkill /F /T` 同步杀死整个后端进程树，避免子进程持有端口 3080 导致 NSIS 覆盖失败 + 新版本端口冲突。window-all-closed 与 mainWindow.on("closed") 同步加固。
+- **更新时无法关闭 (Bug #15，深度修复)**：根因三层——①非静默安装器弹"无法关闭 DeepSeekHarness"对话框且重试无效；②更新杀后端后 respawn 逻辑 1 秒内重启 node.exe，重新锁住安装目录文件；③后端派生的 esbuild/ripgrep/conpty 子进程残留，持续锁文件并占用端口 3080。修复：`isQuitting` 标志阻断 respawn → `killBackendTree()` 杀整棵进程树（taskkill /T + 按安装目录路径过滤兜底）→ `quitAndInstall(true, true)` 静默安装（无对话框）→ 4 秒看门狗兜底强退。before-quit / window-all-closed / closed 三条退出路径统一加固。
 
 ## 升级说明
 

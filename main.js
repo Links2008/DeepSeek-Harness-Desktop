@@ -21,6 +21,43 @@ const CONTROL_EXPANDED_X = 23;
 const CONTROL_Y = 3;
 const CONTROL_MOTION_MS = 160;
 let dshProc = null;
+// v3.1.2-deep：更新/退出状态。更新时杀后端会触发 exit→respawn 恶性循环
+// （后端重启→node.exe 重新锁住安装目录→NSIS 无法替换文件→"无法关闭"死循环），
+// isQuitting 用于阻断 respawn；pendingInstallerPath 供看门狗兜底拉起安装器。
+let isQuitting = false;
+let pendingInstallerPath = null;
+let installInFlight = false;
+
+// v3.1.2-deep：杀掉后端整个进程树。dshProc.kill() 只杀直接子进程，而后端会
+// 再 spawn esbuild/ripgrep/conpty 等（见 dsh-runtime/node_modules），任何一个
+// 存活都会锁住安装目录文件并占用端口 3080，导致更新安装失败或退出挂起。
+function killBackendTree() {
+  if (!dshProc) return;
+  const pid = dshProc.pid;
+  try { dshProc.removeAllListeners("exit"); } catch (e) {}
+  try { dshProc.kill(); } catch (e) {}
+  if (pid && process.platform === "win32") {
+    try {
+      require("child_process").spawnSync(
+        "taskkill", ["/F", "/T", "/PID", String(pid)],
+        { windowsHide: true, stdio: "ignore", timeout: 15000 }
+      );
+    } catch (e) {}
+    // 兜底：杀掉所有从本安装目录启动的 node 进程（按路径过滤，不误杀其他 node）
+    try {
+      const instDir = path.dirname(process.execPath).replace(/'/g, "''");
+      require("child_process").spawnSync(
+        "powershell",
+        ["-NoProfile", "-Command",
+         "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
+         "Where-Object { $_.ExecutablePath -like '" + instDir + "*' } | " +
+         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+        { windowsHide: true, stdio: "ignore", timeout: 20000 }
+      );
+    } catch (e) {}
+  }
+  dshProc = null;
+}
 let mainWindow = null;
 let controlsView = null;
 let controlsX = CONTROL_COLLAPSED_X;
@@ -130,6 +167,7 @@ function initializeUpdater() {
   });
   autoUpdater.on("update-downloaded", (info) => {
     log("update ready: " + info.version + " file=" + info.downloadedFile);
+    pendingInstallerPath = info.downloadedFile || null;
     emitUpdateState({ status: "ready", version: info.version, percent: 100 });
     notifyUpdate("新版本 " + info.version + " 已就绪", "点击侧栏「重启更新」按钮立即安装");
   });
@@ -264,6 +302,9 @@ const startBackend = (attempt) => {
       dshProc.on("error", (e) => log("spawn error: " + e.message));
       dshProc.on("exit", (c) => {
         log("backend exited code=" + c);
+        // v3.1.2-deep：更新/退出中不 respawn。原逻辑在更新杀后端后 1s 内重启
+        // 后端，node.exe 重新锁住安装目录 → NSIS"无法关闭"→ 更新失败死循环。
+        if (isQuitting) { log("skip respawn: quitting"); return; }
         const wasReady = backendReady;
         if (respawnCount < MAX_RESPAWN && c !== 0) {
           respawnCount++;
@@ -940,7 +981,9 @@ function createWindow() {
     stopControlsMotion();
     mainWindow = null;
     controlsView = null;
-    if (dshProc) { try { dshProc.kill(); } catch (e) {} dshProc = null; }
+    // v3.1.2-deep：杀整棵进程树（含 esbuild/ripgrep 等子进程），防退出挂起
+    isQuitting = true;
+    killBackendTree();
     app.quit();
   });
 }
@@ -1031,8 +1074,31 @@ ipcMain.handle("app:check-update", async (event) => {
 ipcMain.handle("app:install-update", (event) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
   if (!autoUpdater || updateState.status !== "ready") return false;
+  if (installInFlight) return true;
+  installInFlight = true;
   log("installing downloaded update");
-  autoUpdater.quitAndInstall(false, true);
+  // v3.1.2-deep：彻底修复"更新时无法关闭"。旧流程 quitAndInstall(false,true)
+  // 的三层缺陷：①非静默安装器弹"无法关闭 DeepSeekHarness"+重试死循环；②后端
+  // 被杀后 respawn 逻辑 1s 内重启 node.exe 重新锁住安装目录；③残留的 esbuild/
+  // ripgrep/conpty 子进程锁文件占用端口。修复：先标记退出（阻断 respawn）→
+  // 杀整棵进程树（释放文件锁与端口）→ 静默安装（无对话框）→ 看门狗兜底强退。
+  isQuitting = true;
+  killBackendTree();
+  try { if (controlsView) { controlsView = null; } } catch (e) {}
+  autoUpdater.quitAndInstall(true, true);
+  // 看门狗：若 app.quit() 被未知句柄阻塞，4s 后直接拉起安装器并强退自身。
+  // 安装器已由 quitAndInstall 以 detached 模式拉起；此处二次拉起会被 NSIS
+  // 互斥锁安全忽略，不影响安装。
+  const installer = pendingInstallerPath;
+  setTimeout(() => {
+    log("update watchdog: forcing exit");
+    try {
+      if (installer && fs.existsSync(installer)) {
+        spawn(installer, ["/S"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+      }
+    } catch (e) { log("watchdog spawn failed: " + e.message); }
+    setTimeout(() => app.exit(0), 800);
+  }, 4000).unref();
   return true;
 });
 ipcMain.on("task:complete", (event, details = {}) => {
@@ -1096,6 +1162,14 @@ if (hasSingleInstanceLock) {
 
 app.on("window-all-closed", () => {
   try { globalShortcut.unregisterAll(); } catch (e) {}
-  if (dshProc) { try { dshProc.kill(); } catch (e) {} }
+  // v3.1.2-deep：杀整棵进程树，防退出挂起与文件锁残留
+  isQuitting = true;
+  killBackendTree();
   app.quit();
+});
+
+// v3.1.2-deep：任何退出路径（含 app.quit 级联）都先阻断 respawn 并清理进程树
+app.on("before-quit", () => {
+  isQuitting = true;
+  if (dshProc) killBackendTree();
 });
