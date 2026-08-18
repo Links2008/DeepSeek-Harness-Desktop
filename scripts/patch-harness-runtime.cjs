@@ -45,9 +45,26 @@ function patchCompaction(source) {
 }
 
 function patchConversation(source) {
-  source = replaceOnce(source, "\t\t\t\tconst hasFiles = (event) => event.dataTransfer?.types.includes(\"Files\") ?? false;", "\t\t\t\tconst hasFiles = (event) => event.dataTransfer?.types.includes(\"Files\") ?? false;\n\t\t\t\tconst onImageFiles = (event) => {\n\t\t\t\t\tconst files = event.detail?.files;\n\t\t\t\t\tif (!canAcceptDrop || !Array.isArray(files) || files.length === 0) return;\n\t\t\t\t\tintakeImages(files);\n\t\t\t\t};", "conversation image bridge");
-  source = replaceOnce(source, "\t\t\t\tdocument.addEventListener(\"dragenter\", onDragEnter);", "\t\t\t\tdocument.addEventListener(\"dsh:image-files\", onImageFiles);\n\t\t\t\tdocument.addEventListener(\"dragenter\", onDragEnter);", "conversation bridge listener");
-  return replaceOnce(source, "\t\t\t\t\tdocument.removeEventListener(\"dragenter\", onDragEnter);", "\t\t\t\t\tdocument.removeEventListener(\"dsh:image-files\", onImageFiles);\n\t\t\t\t\tdocument.removeEventListener(\"dragenter\", onDragEnter);", "conversation bridge cleanup");
+  const imageBridgeCode = "\n\t\t\t\tconst onImageFiles = (event) => {\n\t\t\t\t\tconst files = event.detail?.files;\n\t\t\t\t\tif (!canAcceptDrop || !Array.isArray(files) || files.length === 0) return;\n\t\t\t\t\tintakeImages(files);\n\t\t\t\t};";
+  if (!source.includes("onImageFiles")) {
+    const hasFilesPattern = /(\t\t\t\tconst\s+hasFiles\s*=\s*\([^)]*\)\s*=>\s*event\.dataTransfer\?\.\s*types\.includes\(["']Files["']\)\s*\?\?\s*false;)/;
+    if (hasFilesPattern.test(source)) {
+      source = source.replace(hasFilesPattern, "$1" + imageBridgeCode);
+    }
+  }
+  if (!source.includes('addEventListener("dsh:image-files"') && !source.includes("addEventListener('dsh:image-files'")) {
+    const dragEnterPattern = /(\t\t\t\tdocument\.addEventListener\(["']dragenter["'],\s*onDragEnter\);)/;
+    if (dragEnterPattern.test(source)) {
+      source = source.replace(dragEnterPattern, "\t\t\t\tdocument.addEventListener(\"dsh:image-files\", onImageFiles);\n$1");
+    }
+  }
+  if (!source.includes('removeEventListener("dsh:image-files"') && !source.includes("removeEventListener('dsh:image-files'")) {
+    const dragEnterRemovePattern = /(\t\t\t\t\tdocument\.removeEventListener\(["']dragenter["'],\s*onDragEnter\);)/;
+    if (dragEnterRemovePattern.test(source)) {
+      source = source.replace(dragEnterRemovePattern, "\t\t\t\t\tdocument.removeEventListener(\"dsh:image-files\", onImageFiles);\n$1");
+    }
+  }
+  return source;
 }
 
 function patchAquaSlotKey(source) {

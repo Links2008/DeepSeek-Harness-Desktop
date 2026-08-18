@@ -1,5 +1,5 @@
 // DeepSeek Harness Electron 桌面壳
-const { app, BrowserWindow, WebContentsView, ipcMain, Notification } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const http = require("http");
@@ -88,6 +88,16 @@ function initializeUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
+  // v3.0.1-fix：app-update.yml 中配置的 release tag 路径与实际 GitHub Release
+  // 不一致，导致 latest.yml 404。这里显式 setFeedURL 兜底为正确的仓库。
+  try {
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner: "Links2008",
+      repo: "DeepSeek-Harness-Desktop",
+      releaseType: "release",
+    });
+  } catch (e) { log("setFeedURL failed: " + e.message); }
   let progressBucket = -1;
   // v2.2.1-r3：更新终态系统通知（用户反馈点击更新无任何提示，此前仅写按钮 tooltip）
   const notifyUpdate = (title, body) => {
@@ -226,10 +236,15 @@ async function ensureDshBackend() {
     } catch (e) { backendLogClosed = true; }
   };
   let backendReady = false;
-  let respawned = false;
+  // v3.0.1-fix：原逻辑仅允许 1 次 respawn，且无退避间隔，后端运行中崩溃完全不重试。
+  // 改为最多 3 次重试 + 指数退避（1s/4s/16s），运行中崩溃也重试。
+  let respawnCount = 0;
+  const MAX_RESPAWN = 3;
 
 const startBackend = (attempt) => {
     try {
+      // v3.0.1-fix：每次启动后端前都调用 healOrphanedSettingsLock()。
+      try { healOrphanedSettingsLock(); } catch (e) {}
       dshProc = spawn(
         backend.command,
         backend.args,
@@ -255,10 +270,18 @@ const startBackend = (attempt) => {
       dshProc.on("error", (e) => log("spawn error: " + e.message));
       dshProc.on("exit", (c) => {
         log("backend exited code=" + c);
-        if (!backendReady && c !== 0 && !respawned) {
-          respawned = true;
-          log("backend respawn attempt=1");
-          startBackend(2);
+        const wasReady = backendReady;
+        if (respawnCount < MAX_RESPAWN && c !== 0) {
+          respawnCount++;
+          const delayMs = Math.pow(4, respawnCount - 1) * 1000;
+          if (wasReady) {
+            backendReady = false;
+            backendReadyAt = 0;
+          }
+          log("backend respawn attempt=" + respawnCount + " after " + delayMs + "ms");
+          setTimeout(() => startBackend(attempt + respawnCount), delayMs);
+        } else if (respawnCount >= MAX_RESPAWN) {
+          log("backend respawn max attempts reached, giving up");
         }
       });
     } catch (e) { log("spawn threw: " + e.message); }
@@ -313,6 +336,11 @@ function watchProfileChanges() {
   const queueReload = (why) => {
     if (!backendReadyAt) {
       log("profile change before backend ready ignored (" + why + ")");
+      return;
+    }
+    // v3.0.1-fix：后端就绪后 5 秒静默窗口，避免后端启动末尾的 pnpm 自检触发重载。
+    if (Date.now() - backendReadyAt < 5000) {
+      log("profile change in startup quiet window ignored (" + why + ")");
       return;
     }
     log("profile change detected (" + why + "), reload queued");
@@ -506,12 +534,41 @@ async function injectWindowChrome() {
         window.__dshNativeDragTarget = header;
       }
 
+      // v3.0.1-fix：绑定侧栏底部"退出"按钮。stopImmediatePropagation 防止重载吞点击。
+      function bindQuitButton() {
+        if (!window.dshWin || !window.dshWin.close) return;
+        var scopes = [document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]'), document];
+        var candidates = [];
+        for (var i = 0; i < scopes.length; i++) {
+          if (!scopes[i]) continue;
+          var buttons = scopes[i].querySelectorAll('button, a[role="button"], [role="button"]');
+          for (var j = 0; j < buttons.length; j++) {
+            var b = buttons[j];
+            if (b.__dshQuitBound) continue;
+            var label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).trim();
+            if (/^(退出应用|退出|Quit|Exit|退出登录|Log\s*out|Sign\s*out)$/i.test(label) ||
+                /^退出.*应用|.*Quit.*Application/i.test(label)) {
+              b.__dshQuitBound = true;
+              candidates.push(b);
+            }
+          }
+        }
+        candidates.forEach(function (button) {
+          button.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            try { window.dshWin.close({ reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }); } catch (e) {}
+          }, true);
+        });
+      }
+
       function ensureChrome() {
         if (!document.body) return;
         document.querySelector('.dsh-drag-region')?.remove();
         bindSidebarTracker();
         bindUpdateButton();
         bindNativeDragRegion();
+        bindQuitButton();
       }
       ensureChrome();
       if (!window.__dshChromeObserver) {
@@ -771,6 +828,38 @@ async function createControlsOverlay() {
   await controlsView.webContents.loadFile(path.join(__dirname, "window-controls.html"));
 }
 
+// v3.0.1-fix：providers 迁移。3.0.0 升级后 settings.yaml 的 llm-pi-ai.providers
+// 被重置为空对象 {}，但 .credentials.yaml 仍保留 DEEPSEEK_API_KEY。启动时检测该
+// 不一致，从凭据恢复 deepseek-official provider 占位配置。
+function reconcileProviders() {
+  try {
+    const dshDir = path.join(app.getPath("home"), ".dsh");
+    const settingsPath = path.join(dshDir, "settings.yaml");
+    const credentialsPath = path.join(dshDir, ".credentials.yaml");
+    if (!fs.existsSync(settingsPath) || !fs.existsSync(credentialsPath)) return;
+    const settings = fs.readFileSync(settingsPath, "utf8");
+    if (!/llm-pi-ai:\s*\n\s*providers:\s*\{\s*\}/.test(settings)) return;
+    const credentials = fs.readFileSync(credentialsPath, "utf8");
+    const apiKeyMatch = credentials.match(/DEEPSEEK_API_KEY:\s*(sk-[A-Za-z0-9]+)/);
+    if (!apiKeyMatch) {
+      log("reconcileProviders: 凭据中未找到 DEEPSEEK_API_KEY，跳过");
+      return;
+    }
+    const apiKey = apiKeyMatch[1];
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const backupPath = path.join(dshDir, `settings.yaml.bak-reconcile-${stamp}`);
+    try { fs.copyFileSync(settingsPath, backupPath); } catch (e) {}
+    const newSettings = settings.replace(
+      /llm-pi-ai:\s*\n\s*providers:\s*\{\s*\}/,
+      `llm-pi-ai:\n  providers:\n    deepseek-official:\n      apiKey: ${apiKey}\n      baseURL: https://api.deepseek.com`
+    );
+    fs.writeFileSync(settingsPath, newSettings, "utf8");
+    log("reconcileProviders: deepseek-official provider 已从凭据恢复（备份: " + path.basename(backupPath) + "）");
+  } catch (e) {
+    log("reconcileProviders failed: " + e.message);
+  }
+}
+
 function applyRuntimePatches() {
   if (!app.isPackaged) return;
   try {
@@ -1003,6 +1092,14 @@ if (hasSingleInstanceLock) {
     loadControlState();
     healOrphanedSettingsLock();
     applyRuntimePatches();
+    reconcileProviders();
+    // v3.0.1-fix：注册 Ctrl+Q 全局快捷键作为退出兜底。
+    try {
+      globalShortcut.register("CommandOrControl+Q", () => {
+        log("quit via Ctrl+Q shortcut");
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      });
+    } catch (e) { log("global shortcut register failed: " + e.message); }
     const backendPromise = ensureDshBackend();
     createWindow();
     initializeUpdater();
@@ -1029,6 +1126,7 @@ if (hasSingleInstanceLock) {
 }
 
 app.on("window-all-closed", () => {
+  try { globalShortcut.unregisterAll(); } catch (e) {}
   if (dshProc) { try { dshProc.kill(); } catch (e) {} }
   app.quit();
 });
