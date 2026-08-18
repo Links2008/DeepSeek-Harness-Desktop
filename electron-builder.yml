@@ -2,6 +2,8 @@ appId: com.deepseek.dsh
 productName: DeepSeekHarness
 directories:
   output: installer-dist
+# v3.1.3：包体优化——maximum 压缩 + 排除运行时中不必要的文件
+compression: maximum
 files:
   - main.js
   - desktop-behavior.js
@@ -22,6 +24,25 @@ extraResources:
       - "**/*"
       - "!**/*.map"
       - "!**/*.d.ts"
+      - "!**/*.md"
+      - "!**/*.markdown"
+      - "!**/README*"
+      - "!**/CHANGELOG*"
+      - "!**/LICENSE*"
+      - "!**/AUTHORS*"
+      - "!**/test/**"
+      - "!**/tests/**"
+      - "!**/__tests__/**"
+      - "!**/.github/**"
+      - "!**/docs/**"
+      - "!**/doc/**"
+      - "!**/coverage/**"
+      - "!**/.nyc_output/**"
+      - "!**/*.log"
+      - "!**/.travis.yml"
+      - "!**/appveyor.yml"
+      - "!**/.eslintrc*"
+      - "!**/.git*"
 win:
   target:
     - target: nsis

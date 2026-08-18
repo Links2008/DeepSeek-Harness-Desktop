@@ -737,6 +737,59 @@ async function injectDesktopTweaks() {
       }
       ensureStoreEntry();
       window.__dshStorePollTimer = setInterval(ensureStoreEntry, 2500);
+      // v3.1.3-fix：用户反馈"侧栏收起时文字停留3秒后才变图标"。
+      // setInterval 2.5s 轮询太慢，挂载 ResizeObserver 直接监听 sidebarColumn
+      // 宽度变化，实现即时响应；轮询保留作为兜底。
+      if (!window.__dshStoreResizeObserver && typeof ResizeObserver !== 'undefined') {
+        var applyStoreIconState = function () {
+          var entry = document.querySelector('[data-dsh-store-entry]');
+          if (!entry) return;
+          var col = sidebarColumn();
+          var w = col ? col.getBoundingClientRect().width : 320;
+          if (w > 0 && w < 72) entry.dataset.dshIcon = '';
+          else delete entry.dataset.dshIcon;
+        };
+        window.__dshStoreResizeObserver = new ResizeObserver(function () { applyStoreIconState(); });
+        var attachTries = 0;
+        var attachObserver = function () {
+          var col = sidebarColumn();
+          if (col) {
+            window.__dshStoreResizeObserver.observe(col);
+          } else if (++attachTries < 30) {
+            setTimeout(attachObserver, 100);
+          }
+        };
+        attachObserver();
+      }
+      // v3.1.3：隐藏"技能中心"侧边栏面板与"良神模式"预设选项。
+      // 这些是 dsh-runtime UI 中的选项，desktop shell 通过 CSS+JS 隐藏。
+      var hideUnusedPanels = function () {
+        var style = document.getElementById('dsh-hide-unused');
+        if (!style) {
+          style = document.createElement('style');
+          style.id = 'dsh-hide-unused';
+          style.textContent = [
+            // 隐藏技能中心侧边栏入口与面板
+            '[data-pane="skills"], [data-pane="skill-center"], [data-tab="skills"] { display: none !important; }',
+            '[aria-label="技能中心"], [aria-label="Skills"], [title="技能中心"] { display: none !important; }',
+            // 隐藏"良神模式"预设选项（匹配多种可能名称）
+            '[data-preset-id="liangshen"], [data-preset-id="liang-shen"], [data-preset-id="lsmode"] { display: none !important; }',
+            'option[value="liangshen"], option[value="liang-shen"], option[value="lsmode"] { display: none !important; }'
+          ].join('\n');
+          document.head.appendChild(style);
+        }
+        // JS 层面移除文本匹配"良神/量神/两神"的可点击元素
+        var nodes = document.querySelectorAll('[role="option"], [role="radio"], [data-preset], .preset-item, .preset-option');
+        nodes.forEach(function (n) {
+          var text = (n.textContent || '').trim();
+          if (/良神|量神|两神/.test(text) && !n.dataset.dshHidden) {
+            n.dataset.dshHidden = '1';
+            n.style.display = 'none';
+          }
+        });
+      };
+      hideUnusedPanels();
+      window.__dshHideUnusedTimer = setInterval(hideUnusedPanels, 3000);
     })();
   `);
 }
@@ -961,9 +1014,12 @@ function createWindow() {
   });
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
   mainWindow.webContents.on("dom-ready", async () => {
-    try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
-    try { await injectDesktopTweaks(); } catch (e) { log("desktop tweaks error: " + e.message); }
-    try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
+    // v3.1.3：三个注入并行执行，减少黑屏时间
+    await Promise.all([
+      injectWindowChrome().catch((e) => log("inject error: " + e.message)),
+      injectDesktopTweaks().catch((e) => log("desktop tweaks error: " + e.message)),
+      injectTaskCompletionBridge().catch((e) => log("completion bridge error: " + e.message)),
+    ]);
   });
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
