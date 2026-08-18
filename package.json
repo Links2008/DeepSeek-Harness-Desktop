@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "3.1.3",
+  "version": "3.1.2",
   "private": true,
   "description": "Windows desktop shell and one-click installer for DeepSeek Harness",
   "license": "MIT",
