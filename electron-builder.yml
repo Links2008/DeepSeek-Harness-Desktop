@@ -2,8 +2,8 @@ appId: com.deepseek.dsh
 productName: DeepSeekHarness
 directories:
   output: installer-dist
-# v3.1.3：包体优化——maximum 压缩 + 排除运行时中不必要的文件
-compression: maximum
+# v3.1.2：保持 normal 压缩（maximum 太慢，build 时间 2-3x），仅排除无用文件减体
+compression: normal
 files:
   - main.js
   - desktop-behavior.js
