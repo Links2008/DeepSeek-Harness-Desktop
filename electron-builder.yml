@@ -2,8 +2,6 @@ appId: com.deepseek.dsh
 productName: DeepSeekHarness
 directories:
   output: installer-dist
-# v3.1.2：保持 normal 压缩（maximum 太慢，build 时间 2-3x），仅排除无用文件减体
-compression: normal
 files:
   - main.js
   - desktop-behavior.js
@@ -24,25 +22,6 @@ extraResources:
       - "**/*"
       - "!**/*.map"
       - "!**/*.d.ts"
-      - "!**/*.md"
-      - "!**/*.markdown"
-      - "!**/README*"
-      - "!**/CHANGELOG*"
-      - "!**/LICENSE*"
-      - "!**/AUTHORS*"
-      - "!**/test/**"
-      - "!**/tests/**"
-      - "!**/__tests__/**"
-      - "!**/.github/**"
-      - "!**/docs/**"
-      - "!**/doc/**"
-      - "!**/coverage/**"
-      - "!**/.nyc_output/**"
-      - "!**/*.log"
-      - "!**/.travis.yml"
-      - "!**/appveyor.yml"
-      - "!**/.eslintrc*"
-      - "!**/.git*"
 win:
   target:
     - target: nsis
