@@ -97,6 +97,55 @@ function reconcileClientOnlyPlugins(profileDir) {
   return activated;
 }
 
+// v3.1.1：聚合包去重防护。dsh-web-ui-all@0.2.0 起在自身 bundle patch 里
+// 内置了 dsh-better-sidebar 入口（web-ui-better-sidebar），与 profile 的
+// dsh.profile.bundles 显式声明形成双重加载——两个实例都注册 /sidebar/api，
+// 后端启动即抛 duplicate prefix route 并以 code=1 退出（页面 ERR_FAILED，
+// 用户感知为"插件更新后崩溃"）。规则：扫描 profile 依赖中声明了
+// dsh.bundle.patch 的聚合包，其 insert 的 name 若已被 profile bundles
+// 显式声明，则在 profile 补丁层禁用该聚合入口（保留显式加载，功能不变）。
+// 幂等：目标 id 已在补丁层出现时跳过；失败向上抛由 onFailure 单点上报。
+function dedupeAggregatedPluginEntries(profileDir) {
+  const manifestPath = path.join(profileDir, "package.json");
+  const patchPath = path.join(profileDir, "cordis.patch.yml");
+  if (!fs.existsSync(manifestPath) || !fs.existsSync(patchPath)) return [];
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const explicitBundles = new Set(manifest.dsh?.profile?.bundles ?? []);
+  if (explicitBundles.size === 0) return [];
+  const suppressed = [];
+  const candidates = new Set([...explicitBundles, ...Object.keys(manifest.dependencies ?? {})]);
+  for (const name of candidates) {
+    if (name.startsWith("@") && name.split("/").length !== 2) continue;
+    const pkgPath = path.join(profileDir, "node_modules", ...name.split("/"), "package.json");
+    const patchFile = path.join(profileDir, "node_modules", ...name.split("/"), "cordis.patch.yml");
+    if (!fs.existsSync(pkgPath) || !fs.existsSync(patchFile)) continue;
+    let pkg;
+    try { pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")); } catch { continue; }
+    if (pkg.dsh?.bundle?.patch === void 0) continue;
+    const source = fs.readFileSync(patchFile, "utf8");
+    for (const match of source.matchAll(/- id:\s*([^\s]+)\s*\n\s+name:\s*'?([^\s']+)/g)) {
+      const entryId = match[1], entryName = match[2];
+      // 只压制"聚合包替别人 insert"的条目：entry 已被显式声明且不是聚合包自身
+      if (!explicitBundles.has(entryName) || entryName === name) continue;
+      suppressed.push(`${entryId}(${name})`);
+    }
+  }
+  if (suppressed.length === 0) return [];
+  let patch = fs.readFileSync(patchPath, "utf8");
+  const additions = [];
+  for (const item of suppressed) {
+    const entryId = item.slice(0, item.indexOf("("));
+    if (new RegExp(`^\\s*- id:\\s*${entryId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(patch)) continue;
+    if (!additions.some((a) => a.startsWith(`- id: ${entryId}\n`))) {
+      additions.push(`- id: ${entryId}\n  disabled: true`);
+    }
+  }
+  if (additions.length === 0) return [];
+  patch += `\n# dsh-desktop dedupe: aggregated entry duplicates an explicit profile bundle;\n# suppressing the aggregated copy to avoid duplicate route registration at boot.\n${additions.join("\n")}\n`;
+  fs.writeFileSync(patchPath, patch, "utf8");
+  return suppressed;
+}
+
 function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
   const onFailure = typeof options.onFailure === "function" ? options.onFailure : null;
   const modules = path.join(runtimeRoot, "node_modules");
@@ -121,6 +170,11 @@ function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
     } catch (error) {
       if (onFailure) onFailure(`activate-client-plugins: ${error.message}`);
     }
+    try {
+      changed.push(...dedupeAggregatedPluginEntries(profileDir).map((item) => `dedupe:${item}`));
+    } catch (error) {
+      if (onFailure) onFailure(`dedupe-aggregated-entries: ${error.message}`);
+    }
   }
   return changed;
 }
@@ -131,4 +185,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, reconcileClientOnlyPlugins };
+module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };

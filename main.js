@@ -323,6 +323,10 @@ function watchProfileChanges() {
         log("plugin reload skipped: rate limited");
         return;
       }
+      // v3.1.1：重载前重放运行时补丁（含聚合入口去重）——插件/商店更新可能
+      // 引入与显式 bundle 重复的聚合入口，不先去重会在后端下次启动时因
+      // duplicate prefix route 崩溃（better-sidebar /sidebar/api 双注册事故）
+      try { applyRuntimePatches(); } catch (e) { log("pre-reload patch replay failed: " + e.message); }
       if (mainWindow && !mainWindow.isDestroyed()) {
         lastPluginReloadAt = Date.now();
         log("reloading web UI after plugin change");

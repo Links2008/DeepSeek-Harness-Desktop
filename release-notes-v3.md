@@ -1,4 +1,4 @@
-# DeepSeek Harness Desktop v3
+﻿# DeepSeek Harness Desktop v3
 
 v3 聚焦插件生态可用性与界面稳定：插件商店升为顶级入口、插件装卸链路修复、界面抖动根除、冷启动治理。基于 v2.2.1 桌面壳迭代（壳层补丁 r3–r6）与 Web profile 整改。
 
@@ -39,15 +39,14 @@ v3 聚焦插件生态可用性与界面稳定：插件商店升为顶级入口�
 - 云母（Mica）模式统计栏缓存命中数显示偏移修复（`apply-mica-fix.ps1`）。
 
 ## 升级说明
-- 已安装 v2.x 的用户：下载 Release 中的完整压缩包覆盖安装目录，或仅覆盖 `resources\app.asar`（Web profile 的改动在首次启动时自动生效）。
+- 已安装 v2.x 的用户：直接运行本 Release 的 `DeepSeekHarness-Setup-3.0.0.exe` 覆盖安装，安装器会自动关闭正在运行的应用与内置后端；应用内点击侧栏下载图标检查更新亦可自动升级。
 - 安装包暂无商业代码签名，SmartScreen 可能提示「未知发布者」：更多信息 → 仍要运行；Release 说明中可核对 SHA-256。
 
 ## 资产校验（SHA-256）
 
 | 资产 | SHA-256 |
 | --- | --- |
-| `app.asar` | `37f52937b3eff4996d409f8d59727ccdbfd4235edb8d89f2d1ed660450a447e6` |
-| `DeepSeekHarness-v3-win-x64.zip` | `47138ad09ea487ff94222d184b5f58b83e1ad1f446a09679305406f2326829bf` |
+| `DeepSeekHarness-Setup-3.0.0.exe`（331,917,315 字节） | `3BC2D796E937E79186AC19312B8FE73C79E17FCE3A458692E1979EE3A525B303` |
 
 ## 已知限制
 - 话题侧栏总结需在设置中配置 DeepSeek API Key 后可用。
