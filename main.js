@@ -88,16 +88,10 @@ function initializeUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
-  // v3.0.1-fix：app-update.yml 中配置的 release tag 路径与实际 GitHub Release
-  // 不一致，导致 latest.yml 404。这里显式 setFeedURL 兜底为正确的仓库。
-  try {
-    autoUpdater.setFeedURL({
-      provider: "github",
-      owner: "Links2008",
-      repo: "DeepSeek-Harness-Desktop",
-      releaseType: "release",
-    });
-  } catch (e) { log("setFeedURL failed: " + e.message); }
+  // v3.1.2-fix：app-update.yml 已有正确的 owner/repo 配置（验证脚本确认），
+  // setFeedURL 会覆盖 app-update.yml 且可能触发 GitHub API 速率限制（未认证
+  // 60 次/小时），导致"更新失败"。移除 setFeedURL，让 electron-updater 用
+  // app-update.yml 的原生配置。
   let progressBucket = -1;
   // v2.2.1-r3：更新终态系统通知（用户反馈点击更新无任何提示，此前仅写按钮 tooltip）
   const notifyUpdate = (title, body) => {
@@ -534,33 +528,9 @@ async function injectWindowChrome() {
         window.__dshNativeDragTarget = header;
       }
 
-      // v3.0.1-fix：绑定侧栏底部"退出"按钮。stopImmediatePropagation 防止重载吞点击。
-      function bindQuitButton() {
-        if (!window.dshWin || !window.dshWin.close) return;
-        var scopes = [document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]'), document];
-        var candidates = [];
-        for (var i = 0; i < scopes.length; i++) {
-          if (!scopes[i]) continue;
-          var buttons = scopes[i].querySelectorAll('button, a[role="button"], [role="button"]');
-          for (var j = 0; j < buttons.length; j++) {
-            var b = buttons[j];
-            if (b.__dshQuitBound) continue;
-            var label = ((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || '')).trim();
-            if (/^(退出应用|退出|Quit|Exit|退出登录|Log\s*out|Sign\s*out)$/i.test(label) ||
-                /^退出.*应用|.*Quit.*Application/i.test(label)) {
-              b.__dshQuitBound = true;
-              candidates.push(b);
-            }
-          }
-        }
-        candidates.forEach(function (button) {
-          button.addEventListener('click', function (event) {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            try { window.dshWin.close({ reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }); } catch (e) {}
-          }, true);
-        });
-      }
+      // v3.1.2-fix：移除 bindQuitButton。它用 stopImmediatePropagation 拦截
+      // click 事件，但选择器太宽泛可能匹配错误按钮，导致正常退出被阻止。
+      // 退出改由 ipcMain.on("win:close") 直接 app.quit() + taskkill 清理。
 
       function ensureChrome() {
         if (!document.body) return;
@@ -568,7 +538,6 @@ async function injectWindowChrome() {
         bindSidebarTracker();
         bindUpdateButton();
         bindNativeDragRegion();
-        bindQuitButton();
       }
       ensureChrome();
       if (!window.__dshChromeObserver) {
@@ -1050,7 +1019,21 @@ ipcMain.on("win:max", () => {
   updateMaximizedChrome(command === "maximize");
   mainWindow[command]();
 });
-ipcMain.on("win:close", () => mainWindow && mainWindow.close());
+ipcMain.on("win:close", () => {
+  // v3.1.2-fix：用户反馈"无法退出"。原逻辑 mainWindow.close() 可能被
+  // ERR_ABORTED 重载循环吞掉。改为直接 app.quit() + taskkill 清理进程树。
+  try {
+    if (dshProc) {
+      const pid = dshProc.pid;
+      if (pid) {
+        try { process.kill(pid); } catch (e) {}
+        try { spawn("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true, stdio: "ignore" }); } catch (e) {}
+      }
+      dshProc = null;
+    }
+  } catch (e) { log("win:close cleanup failed: " + e.message); }
+  app.quit();
+});
 ipcMain.handle("app:get-update-state", () => updateState);
 ipcMain.handle("app:check-update", async (event) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return updateState;
