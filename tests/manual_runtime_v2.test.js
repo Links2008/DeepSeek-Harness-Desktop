@@ -20,7 +20,7 @@ assert.doesNotMatch(main, /setTimeout\s*\(\s*checkForUpdates/);
 assert.match(main, /initializeUpdater/);
 assert.match(main, /autoUpdater\.checkForUpdates\(\)/);
 assert.match(main, /update-downloaded/);
-assert.match(main, /autoUpdater\.quitAndInstall\(false,\s*true\)/);
+assert.match(main, /autoUpdater\.quitAndInstall\(true,\s*true\)/);
 assert.match(main, /button\[aria-label=["']检查更新["']\]/, "reuse the Harness sidebar update button");
 assert.match(main, /data-dsh-update-state/, "the existing button must expose checking, downloading and ready states");
 assert.match(preload, /checkUpdate/);
