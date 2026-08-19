@@ -106,6 +106,59 @@ function healOrphanedSettingsLock() {
   }
 }
 
+// v3.1.3（issue #5）：故障插件自动隔离。Git 依赖插件可能未执行 build 就安装
+// （如 graph-memory@1.6.0-beta.1：package.json 声明 ./dist/dsh.js 但仓库只有
+// dsh.ts/src，无 dist/），DSH 加载时报 ERR_MODULE_NOT_FOUND → 整个 plugin
+// tree boot 失败 → backend 退出 → Desktop 无法连线。上游 dsh 短期难以逐个
+// 兜底，desktop shell 层兜底：backend 启动即崩时解析 stderr 定位坏插件，
+// 从 web profile 的 package.json（dependencies + dsh.profile.bundles）移除
+// （先备份），随后按既有 respawn 逻辑重启，单插件故障不再拖垮整个应用。
+let quarantineCount = 0;
+function quarantineBrokenPlugin(diagText) {
+  try {
+    if (quarantineCount >= 2) return null; // 防循环：一次会话最多隔离 2 个
+    if (!diagText || !/plugin tree failed to load|ERR_MODULE_NOT_FOUND/.test(diagText)) return null;
+    let pkgName = null;
+    // 首选：failed to import loader entry graph-memory (graph-memory/dsh)
+    let m = diagText.match(/failed to import loader entry .+?\((.+?)\/dsh\)/);
+    if (m) pkgName = m[1].trim();
+    // 兜底：ERR_MODULE_NOT_FOUND 行内 node_modules 路径（兼容 scoped 包）
+    if (!pkgName) {
+      m = diagText.match(/ERR_MODULE_NOT_FOUND[\s\S]{0,400}?node_modules[\\/]((?:@[^\\\s/]+[\\/])?[^\\\s/'"]+)/);
+      if (m) pkgName = m[1].trim();
+    }
+    if (!pkgName || !/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(pkgName)) return null;
+    const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+    const manifestPath = path.join(profileDir, "package.json");
+    if (!fs.existsSync(manifestPath)) return null;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const inDeps = manifest.dependencies && Object.prototype.hasOwnProperty.call(manifest.dependencies, pkgName);
+    const bundles = manifest.dsh && manifest.dsh.profile && manifest.dsh.profile.bundles;
+    const inBundles = Array.isArray(bundles) && bundles.includes(pkgName);
+    if (!inDeps && !inBundles) return null;
+    const backup = manifestPath + ".bak-quarantine-" + new Date().toISOString().replace(/[:.]/g, "-");
+    fs.copyFileSync(manifestPath, backup);
+    if (inDeps) delete manifest.dependencies[pkgName];
+    if (inBundles) manifest.dsh.profile.bundles = bundles.filter((b) => b !== pkgName);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    quarantineCount++;
+    log("quarantined broken plugin: " + pkgName + " (backup: " + path.basename(backup) + ")");
+    try {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: "已自动隔离故障插件 " + pkgName,
+          body: "该插件缺少构建产物（无 dist/）导致后端无法启动，已自动移除并重启。原配置备份于 " + path.basename(backup) + "，插件修复后可重新安装。",
+          icon: path.join(__dirname, "deepseek_whale_hermes_rounded.png"),
+        }).show();
+      }
+    } catch (e) {}
+    return pkgName;
+  } catch (e) {
+    log("quarantine failed: " + e.message);
+    return null;
+  }
+}
+
 function emitUpdateState(next) {
   updateState = { ...updateState, ...next, current: app.getVersion() };
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -286,12 +339,15 @@ const startBackend = (attempt) => {
       const spawnStartedAt = Date.now();
       let firstOutputAt = null;
       let readyKeywordAt = null;
+      // v3.1.3（issue #5）：保留 stderr 尾部（64KB），供崩溃时定位坏插件
+      let stderrTail = "";
       const onOutput = (label) => (chunk) => {
         if (firstOutputAt === null) {
           firstOutputAt = Date.now();
           log("backend first-output after " + (firstOutputAt - spawnStartedAt) + "ms");
         }
         appendBackendLog(label, chunk);
+        if (label === "stderr") stderrTail = (stderrTail + chunk.toString()).slice(-65536);
         if (readyKeywordAt === null && /\b(listening|started|ready)\b/i.test(chunk.toString())) {
           readyKeywordAt = Date.now();
           log("backend ready-keyword after " + (readyKeywordAt - spawnStartedAt) + "ms");
@@ -307,6 +363,9 @@ const startBackend = (attempt) => {
         if (isQuitting) { log("skip respawn: quitting"); return; }
         const wasReady = backendReady;
         if (respawnCount < MAX_RESPAWN && c !== 0) {
+          // v3.1.3（issue #5）：启动即崩（plugin tree failed to load）时先隔离
+          // 坏插件再 respawn，单插件故障不再拖垮整个 backend/桌面端。
+          if (!wasReady) quarantineBrokenPlugin(stderrTail);
           respawnCount++;
           const delayMs = Math.pow(4, respawnCount - 1) * 1000;
           if (wasReady) {
@@ -592,10 +651,9 @@ async function injectWindowChrome() {
 async function injectDesktopTweaks() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   await mainWindow.webContents.insertCSS(`
-    /* v2.2：用户要求移除一级菜单的任务看板（插件入口与看板视图一并隐藏） */
-    [data-dsh-taskboard-entry],
-    [data-dsh-taskboard-board],
-    [data-dsh-taskboard-view] { display: none !important; }
+    /* v3.1.3（issue #6）：恢复任务看板显示。v2.2 曾按当时用户要求用 CSS 隐藏
+       （[data-dsh-taskboard-*] { display:none }），导致桌面版侧边栏无「任务看板」
+       条目而浏览器版正常。现移除该隐藏，看板数据本身完好（GET /api/task-board/state 200）。 */
     /* v2.2：云母模式下会话框底下的命中数据栏右偏：aqua 主题给该元素加了
        position:relative，left:50%+translateX 叠加产生净右偏；改为 left:0 清除
        相对偏移，用 margin auto + 定宽 width 居中，窄窗口不再压扁栏体 */
