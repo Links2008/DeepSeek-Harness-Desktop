@@ -5,28 +5,99 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>正在启动 DeepSeek Harness</title>
   <style>
+    :root {
+      --brand: #6d7cff;
+      --brand-strong: #8c9aff;
+      --bg: #121214;
+      --fg: #f0f0f2;
+      --muted: #9b9ba3;
+      --halo-outer: rgba(109, 124, 255, .26);
+      --halo-outer-mid: rgba(109, 124, 255, .10);
+      --halo-inner: rgba(140, 155, 255, .48);
+      --halo-inner-mid: rgba(109, 124, 255, .14);
+      --logo-glow: rgba(109, 124, 255, .34);
+      --spinner-track: #2a2a31;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --brand: #3964fe;
+        --brand-strong: #5a82ff;
+        --bg: #f9fafb;
+        --fg: #0f1115;
+        --muted: #81858c;
+        --halo-outer: rgba(57, 100, 254, .16);
+        --halo-outer-mid: rgba(57, 100, 254, .06);
+        --halo-inner: rgba(57, 100, 254, .28);
+        --halo-inner-mid: rgba(57, 100, 254, .08);
+        --logo-glow: rgba(57, 100, 254, .22);
+        --spinner-track: #e5e7eb;
+      }
+    }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body {
-      display: grid; place-items: center; background: #121214; color: #f0f0f2;
+      display: grid; place-items: center; background: var(--bg); color: var(--fg);
       font: 14px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
     }
-    main { display: grid; justify-items: center; gap: 18px; text-align: center; }
-    img { width: 72px; height: 72px; }
-    .copy { display: grid; gap: 5px; }
+    main { display: grid; justify-items: center; gap: 22px; text-align: center; }
+
+    .logo-stage {
+      position: relative; display: grid; place-items: center;
+      width: 140px; height: 140px;
+    }
+    .logo-stage::before {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle, var(--halo-outer), var(--halo-outer-mid) 46%, transparent 72%);
+      filter: blur(9px);
+      animation: halo 2.6s ease-in-out infinite alternate;
+    }
+    .logo-stage::after {
+      content: ""; position: absolute; width: 98px; height: 98px; border-radius: 50%;
+      background: radial-gradient(circle, var(--halo-inner), var(--halo-inner-mid) 56%, transparent 76%);
+      filter: blur(5px);
+      animation: halo 2.6s ease-in-out infinite alternate;
+    }
+    .logo {
+      width: 84px; height: 84px; position: relative; z-index: 1;
+      animation: float 3.4s cubic-bezier(.45, 0, .55, 1) infinite;
+      filter: drop-shadow(0 0 16px var(--logo-glow));
+      will-change: transform;
+    }
+
+    .copy { display: grid; gap: 6px; animation: fadeUp .9s cubic-bezier(.22, 1, .36, 1) .15s both; }
     [data-status] { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-    [data-detail] { margin: 0; color: #9b9ba3; font-size: 13px; }
+    [data-detail] { margin: 0; color: var(--muted); font-size: 13px; }
+
     .spinner {
-      width: 20px; height: 20px; border: 2px solid #303036; border-top-color: #7d8cff;
-      border-radius: 50%; animation: spin 800ms linear infinite;
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid var(--spinner-track); border-top-color: var(--brand);
+      animation: spin 800ms linear infinite;
+    }
+
+    @keyframes halo {
+      from { opacity: .6; transform: scale(.94); }
+      to { opacity: 1; transform: scale(1.09); }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-9px); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-color: #7d8cff; } }
+    @media (prefers-reduced-motion: reduce) {
+      .logo-stage::before, .logo-stage::after, .logo, .copy { animation: none; }
+      .spinner { animation: none; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <img src="deepseek_whale_hermes_rounded.png" alt="">
+    <div class="logo-stage">
+      <img class="logo" src="deepseek_whale_hermes_rounded.png" alt="">
+    </div>
     <div class="copy">
       <p data-status>正在启动 DeepSeek Harness</p>
       <p data-detail>首次启动可能需要约一分钟</p>

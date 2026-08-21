@@ -1,5 +1,5 @@
 // DeepSeek Harness Electron 桌面壳
-const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut, nativeTheme } = require("electron");
 const { spawn } = require("child_process");
 const net = require("net");
 const http = require("http");
@@ -526,10 +526,14 @@ async function injectWindowChrome() {
     (function () {
       function bindSidebarTracker() {
         if (!window.dshWin || !window.dshWin.sidebarState || typeof ResizeObserver === 'undefined') return;
-        var frame = Array.from(document.querySelectorAll('div')).find(function (el) {
-          return el.style.gridTemplateColumns && el.style.gridTemplateColumns.indexOf('px') >= 0;
-        });
-        var sidebar = frame && frame.firstElementChild;
+        var frame = window.__dshSidebarFrame;
+        var sidebar = window.__dshSidebarTarget;
+        if (!frame || !sidebar || !frame.isConnected || !sidebar.isConnected) {
+          frame = Array.from(document.querySelectorAll('div')).find(function (el) {
+            return el.style.gridTemplateColumns && el.style.gridTemplateColumns.indexOf('px') >= 0;
+          });
+          sidebar = frame && frame.firstElementChild;
+        }
         if (!sidebar || (sidebar === window.__dshSidebarTarget && frame === window.__dshSidebarFrame)) return;
         if (window.__dshSidebarResizeObserver) window.__dshSidebarResizeObserver.disconnect();
         if (window.__dshSidebarMutationObserver) window.__dshSidebarMutationObserver.disconnect();
@@ -641,7 +645,14 @@ async function injectWindowChrome() {
       }
       ensureChrome();
       if (!window.__dshChromeObserver) {
-        window.__dshChromeObserver = new MutationObserver(function () { queueMicrotask(ensureChrome); });
+        var chromeDebounce = null;
+        window.__dshChromeObserver = new MutationObserver(function () {
+          if (chromeDebounce) return;
+          chromeDebounce = setTimeout(function () {
+            chromeDebounce = null;
+            ensureChrome();
+          }, 200);
+        });
         window.__dshChromeObserver.observe(document.documentElement, { childList: true, subtree: true });
       }
     })();
@@ -671,6 +682,12 @@ async function injectDesktopTweaks() {
       width: min(calc(var(--dsh-chat-content-width) + 32px), calc(100% - 32px)) !important;
       max-width: 100% !important;
     }
+    /* v3.1.3-fix：去掉 Web UI 的 HARNESS 启动加载画面（HARNESS 字标 + 转圈，与桌面壳 loading.html 重复） */
+    div[class*="_boot_"] { display: none !important; }
+    /* v3.1.3-fix：去掉侧边栏「技能中心」条目 */
+    button[data-dsh-skill-explorer-entry] { display: none !important; }
+    /* v3.1.3-fix：删除「退出 DeepSeek Harness」悬浮按钮（退出键失灵，直接移除入口） */
+    div[data-dsh-shutdown-float="true"] { display: none !important; }
   `);
   await mainWindow.webContents.executeJavaScript(`
     (function () {
@@ -777,31 +794,45 @@ async function injectDesktopTweaks() {
           if (tryClickMarketplaceTab() || ++tries > 20) clearInterval(timer);
         }, 250);
       }
+      function syncStoreIcon() {
+        var entry = document.querySelector('[data-dsh-store-entry]');
+        if (!entry || !entry.isConnected) return;
+        var col = sidebarColumn();
+        var w = col ? col.getBoundingClientRect().width : 320;
+        if (w > 0 && w < 72) entry.dataset.dshIcon = '';
+        else delete entry.dataset.dshIcon;
+      }
+      // v3.1.3-fix：ResizeObserver 实时监听侧栏宽度，收起/展开立即切换图标/文字
+      // （此前靠 2.5s 轮询，收起后文字会停留最长 2.5s）。ResizeObserver 只响应尺寸，
+      // 不会与 better-sidebar 的高频 DOM 重写形成正反馈。
+      function bindStoreIconResize() {
+        var col = sidebarColumn();
+        if (!col || col === window.__dshStoreObservedCol) return;
+        if (window.__dshStoreResizeObserver) window.__dshStoreResizeObserver.disconnect();
+        window.__dshStoreObservedCol = col;
+        window.__dshStoreResizeObserver = new ResizeObserver(function () { syncStoreIcon(); });
+        window.__dshStoreResizeObserver.observe(col);
+      }
       function ensureStoreEntry() {
         var existing = document.querySelector('[data-dsh-store-entry]');
-        if (existing && existing.isConnected) {
-          var col = sidebarColumn();
-          var w = col ? col.getBoundingClientRect().width : 320;
-          if (w > 0 && w < 72) existing.dataset.dshIcon = '';
-          else delete existing.dataset.dshIcon;
-          return;
+        if (!existing || !existing.isConnected) {
+          var sshBtn = findSshButton();
+          if (!sshBtn || !sshBtn.parentElement) return;
+          var entry = document.createElement('button');
+          entry.type = 'button';
+          entry.dataset.dshStoreEntry = '';
+          entry.setAttribute('aria-label', '插件商店');
+          entry.title = '插件商店';
+          entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;min-height:36px;box-sizing:border-box;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
+          entry.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
+          entry.addEventListener('click', openStore);
+          var colNow = sidebarColumn();
+          var wNow = colNow ? colNow.getBoundingClientRect().width : 320;
+          if (wNow > 0 && wNow < 72) entry.dataset.dshIcon = '';
+          sshBtn.parentElement.insertBefore(entry, sshBtn.nextSibling);
         }
-        var sshBtn = findSshButton();
-        if (!sshBtn || !sshBtn.parentElement) return;
-        var entry = document.createElement('button');
-        entry.type = 'button';
-        entry.dataset.dshStoreEntry = '';
-        entry.setAttribute('aria-label', '插件商店');
-        entry.title = '插件商店';
-        entry.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;min-height:36px;box-sizing:border-box;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;';
-        entry.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 2h10l1 3H2l1-3z"/><path d="M2.5 5h11V14h-11V5z"/><path d="M6 7.5a2 2 0 0 0 4 0"/></svg><span>插件商店</span>';
-        entry.addEventListener('click', openStore);
-        // v3.0.1：收起态下新建时直接以纯图标插入，避免先渲染中文文字、
-        // 再等下一轮轮询（最长 2.5s）才切成图标。
-        var colNow = sidebarColumn();
-        var wNow = colNow ? colNow.getBoundingClientRect().width : 320;
-        if (wNow > 0 && wNow < 72) entry.dataset.dshIcon = '';
-        sshBtn.parentElement.insertBefore(entry, sshBtn.nextSibling);
+        syncStoreIcon();
+        bindStoreIconResize();
       }
       ensureStoreEntry();
       window.__dshStorePollTimer = setInterval(ensureStoreEntry, 2500);
@@ -1018,7 +1049,7 @@ function createWindow() {
     title: "DeepSeek Harness",
     frame: false,
     transparent: false,
-    backgroundColor: APP_BG,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#121214" : "#f9fafb",
     show: true,
     autoHideMenuBar: true,
     webPreferences: {
@@ -1027,6 +1058,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
   mainWindow.webContents.on("dom-ready", async () => {
     try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
