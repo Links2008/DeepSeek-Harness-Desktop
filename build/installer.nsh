@@ -29,3 +29,22 @@
 !macro customCheckAppRunning
   !insertmacro dshKillRunningProcesses
 !macroend
+
+# electron-builder 的自动更新分支可能保留了 isUpdated，却没有保住旧快捷方式；
+# 此时内置 addDesktopLink 会跳过 RECREATE_DESKTOP_SHORTCUT。安装文件与注册表
+# 已落盘后补齐缺失入口，避免升级完成后桌面或开始菜单找不到应用。
+!macro customInstall
+  ${ifNot} ${FileExists} "$newDesktopLink"
+    CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+  ${endIf}
+
+  ${ifNot} ${FileExists} "$newStartMenuLink"
+    !insertmacro createMenuDirectory
+    CreateShortCut "$newStartMenuLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+    ClearErrors
+    WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
+  ${endIf}
+  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+!macroend

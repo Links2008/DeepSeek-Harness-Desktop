@@ -32,6 +32,10 @@ const installerNsh = fs.readFileSync(path.join(root, "build", "installer.nsh"), 
 assert.match(installerNsh, /!macro customInit/);
 assert.match(installerNsh, /!macro customUnInit/);
 assert.match(installerNsh, /!macro customCheckAppRunning/);
+assert.match(installerNsh, /!macro customInstall/);
+assert.match(installerNsh, /CreateShortCut "\$newDesktopLink" "\$appExe"/);
+assert.match(installerNsh, /WinShell::SetLnkAUMI "\$newDesktopLink" "\$\{APP_ID\}"/);
+assert.match(installerNsh, /CreateShortCut "\$newStartMenuLink" "\$appExe"/);
 assert.match(installerNsh, /taskkill \/F \/IM "\$\{APP_EXECUTABLE_FILENAME\}" \/T/);
 assert.match(installerNsh, /Get-Process -Name node/, "bundled node backend must be closed by install-dir path match");
 
