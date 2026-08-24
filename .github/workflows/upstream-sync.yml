@@ -124,7 +124,7 @@ jobs:
           node scripts/patch-upstream-windows-release.cjs upstream/scripts/release/process.ts
           Push-Location upstream
           pnpm install --frozen-lockfile
-          pnpm run build
+          pnpm run build:official
           pnpm run release:pack --family vendor --out ..\packed-vendor
           pnpm run release:pack --family dsh --out ..\packed-dsh
           Pop-Location
