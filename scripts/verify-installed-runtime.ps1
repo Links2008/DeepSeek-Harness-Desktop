@@ -38,7 +38,7 @@ if (Test-LocalPort 3080) { throw 'Port 3080 was already occupied before acceptan
 if ($LASTEXITCODE -ne 0) { throw '7-Zip rejected the installer archive' }
 
 try {
-  $install = Start-Process $installerPath -ArgumentList @('/S', "/D=$installRoot") -PassThru
+  $install = Start-Process $installerPath -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -PassThru
   $install.WaitForExit()
   if ($install.ExitCode -ne 0) { throw "Installer failed with exit code $($install.ExitCode)" }
   if (!(Test-Path -LiteralPath $appPath)) { throw 'Installed executable is missing' }
@@ -70,7 +70,7 @@ try {
   }
   if (!$registeredApp) { throw 'Start Menu AppID com.deepseek.dsh is not registered' }
 
-  Start-Process $appPath
+  Start-Process $appPath -WindowStyle Hidden
   $ready = $false
   for ($attempt = 0; $attempt -lt 75; $attempt++) {
     Start-Sleep -Seconds 2
@@ -112,7 +112,7 @@ try {
     $cleanupProblems.Add("Expected one uninstaller, found $($uninstallers.Count)")
   } else {
     try {
-      $uninstall = Start-Process $uninstallers[0].FullName -ArgumentList '/S' -PassThru
+      $uninstall = Start-Process $uninstallers[0].FullName -ArgumentList '/S' -WindowStyle Hidden -PassThru
       $uninstall.WaitForExit()
       if ($uninstall.ExitCode -ne 0) { $cleanupProblems.Add("Uninstaller exited with $($uninstall.ExitCode)") }
       for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $appPath); $attempt++) {

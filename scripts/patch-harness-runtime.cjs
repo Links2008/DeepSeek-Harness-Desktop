@@ -83,6 +83,21 @@ function patchMinimalPreset(source) {
   return `${source.trimEnd()}\n\n# Internal context maintenance; these rows do not add model-facing tools.\n- id: compaction\n  name: cordis:group\n  group: true\n  isolate:\n    compaction: true\n    toolResultPruner: true\n  config:\n    - id: compaction-basic\n      name: '@deepseek-ai/dsh-compaction-basic'\n\n    - id: command-compact\n      name: '@deepseek-ai/dsh-command-compact'\n\n    - id: tool-result-pruner\n      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'\n      config:\n        thresholdChars: 8192\n        headChars: 4096\n        tailChars: 1024\n`;
 }
 
+function patchCompileCacheFlush(source) {
+  if (source.includes("[dsh-startup] compile cache flushed")) return source;
+  const before = "\tapp.current = ctx;\n\tif (!signalShutdown.signal.aborted";
+  const after = `\tapp.current = ctx;
+\tif (process.env.NODE_COMPILE_CACHE) {
+\t\ttry {
+\t\t\tconst { flushCompileCache } = await import("node:module");
+\t\t\tflushCompileCache();
+\t\t\tprocess.stderr.write("[dsh-startup] compile cache flushed\\n");
+\t\t} catch {}
+\t}
+\tif (!signalShutdown.signal.aborted`;
+  return replaceOnce(source, before, after, "compile cache flush");
+}
+
 function patchFile(file, transform) {
   if (!fs.existsSync(file)) return false;
   const before = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
@@ -180,6 +195,16 @@ function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
   apply("compaction", path.join(modules, "@deepseek-ai", "dsh-compaction-basic", "lib", "index.js"), patchCompaction);
   apply("conversation", path.join(modules, "@deepseek-ai", "dsh-client-ui-conversation", "lib", "client.js"), patchConversation);
   apply("minimal-compaction", path.join(modules, "@deepseek-ai", "dsh", "config", "agent-presets", "minimal", "agent.cordis.yml"), patchMinimalPreset);
+  const dshLib = path.join(modules, "@deepseek-ai", "dsh", "lib");
+  if (fs.existsSync(dshLib)) {
+    for (const name of fs.readdirSync(dshLib).filter((entry) => /^profile-boot-.+\.js$/.test(entry))) {
+      const file = path.join(dshLib, name);
+      const source = fs.readFileSync(file, "utf8");
+      if (source.includes("\tapp.current = ctx;") || source.includes("[dsh-startup] compile cache flushed")) {
+        apply("compile-cache-flush", file, patchCompileCacheFlush);
+      }
+    }
+  }
   if (profileDir) {
     apply("aqua-slot-key", path.join(profileDir, "node_modules", "@deepseek-ai", "dsh-client-ui-aqua", "lib", "client.js"), patchAquaSlotKey);
     try {
@@ -202,4 +227,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };
+module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };

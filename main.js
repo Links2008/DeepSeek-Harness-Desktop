@@ -6,6 +6,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { patchHarnessRuntime } = require("./scripts/patch-harness-runtime.cjs");
+const { prepareCompileCache } = require("./scripts/prepare-compile-cache.cjs");
+const { prepareProfilePrebundles } = require("./scripts/prepare-profile-prebundles.cjs");
 const {
   APP_ID,
   nextMaximizeCommand,
@@ -60,9 +62,12 @@ function killBackendTree() {
 }
 let mainWindow = null;
 let controlsView = null;
+let startupView = null;
 let controlsX = CONTROL_COLLAPSED_X;
 let controlsMotionTimer = null;
 let lastExpanded = null;
+let startupEntryArmed = false;
+let backendPagePreparedResolve = null;
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -73,6 +78,14 @@ if (!hasSingleInstanceLock) app.quit();
 
 app.on("second-instance", () => {
   focusMainWindow();
+});
+
+ipcMain.on("startup:consume-entry", (event) => {
+  event.returnValue = false;
+  if (!startupEntryArmed || !mainWindow || mainWindow.isDestroyed()) return;
+  if (event.sender !== mainWindow.webContents) return;
+  startupEntryArmed = false;
+  event.returnValue = true;
 });
 
 function log(msg) {
@@ -235,11 +248,18 @@ function resolveBackend() {
   const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
   const bundledNode = path.join(process.resourcesPath, "node", "node.exe");
   const bundledCli = path.join(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  const compileCache = prepareCompileCache(app.getPath("userData"), process.resourcesPath);
+  if (!compileCache.packaged) log("packaged compile cache unavailable, using user-data fallback: " + compileCache.error.message);
   if (fs.existsSync(bundledNode) && fs.existsSync(bundledCli)) {
     return {
       command: bundledNode,
       args: [bundledCli, "web", "--host", "127.0.0.1", "--port", "3080"],
       cwd: runtimeRoot,
+      env: {
+        NODE_COMPILE_CACHE: compileCache.dir,
+        NODE_COMPILE_CACHE_PORTABLE: "1",
+        DSH_TELEMETRY_DISABLED: "1",
+      },
     };
   }
   if (!app.isPackaged && fs.existsSync(DEV_DSH_DIR)) {
@@ -294,6 +314,19 @@ async function ensureDshBackend() {
   }
   const backend = resolveBackend();
   if (!backend) { log("bundled backend runtime is missing"); return false; }
+  if (backend.cwd) {
+    try {
+      const profilePrebundle = await prepareProfilePrebundles({
+        profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
+        runtimeRoot: backend.cwd,
+        stateDir: app.getPath("userData"),
+        onLog: log,
+      });
+      log("profile prebundle " + JSON.stringify(profilePrebundle));
+    } catch (e) {
+      log("profile prebundle unavailable, continuing with original modules: " + e.message);
+    }
+  }
   // v2.2.1-gate：后端 stdout/stderr 汇流写入 dsh_backend.log（每次启动截断，
   // 旧文件先重命名为 .prev；约 2MB 上限，超出后停止写入；出错静默降级）
   const backendLogPath = path.join(app.getPath("userData"), "dsh_backend.log");
@@ -321,6 +354,8 @@ async function ensureDshBackend() {
     } catch (e) { backendLogClosed = true; }
   };
   let backendReady = false;
+  let backendAnnouncedReady = false;
+  let backendStartupSettled = false;
   // v3.0.1-fix：原逻辑仅允许 1 次 respawn，且无退避间隔，后端运行中崩溃完全不重试。
   // 改为最多 3 次重试 + 指数退避（1s/4s/16s），运行中崩溃也重试。
   let respawnCount = 0;
@@ -328,27 +363,45 @@ async function ensureDshBackend() {
 
 const startBackend = (attempt) => {
     try {
+      backendAnnouncedReady = false;
+      backendStartupSettled = false;
       // v3.0.1-fix：每次启动后端前都调用 healOrphanedSettingsLock()。
       try { healOrphanedSettingsLock(); } catch (e) {}
       dshProc = spawn(
         backend.command,
         backend.args,
-        { cwd: backend.cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }
+        {
+          cwd: backend.cwd,
+          windowsHide: true,
+          env: { ...process.env, ...backend.env },
+          stdio: ["ignore", "pipe", "pipe"],
+        }
       );
       log("spawned backend pid=" + dshProc.pid + " attempt=" + attempt);
       const spawnStartedAt = Date.now();
       let firstOutputAt = null;
       let readyKeywordAt = null;
+      let readinessTail = "";
       // v3.1.3（issue #5）：保留 stderr 尾部（64KB），供崩溃时定位坏插件
       let stderrTail = "";
       const onOutput = (label) => (chunk) => {
+        const text = chunk.toString();
         if (firstOutputAt === null) {
           firstOutputAt = Date.now();
           log("backend first-output after " + (firstOutputAt - spawnStartedAt) + "ms");
         }
         appendBackendLog(label, chunk);
-        if (label === "stderr") stderrTail = (stderrTail + chunk.toString()).slice(-65536);
-        if (readyKeywordAt === null && /\b(listening|started|ready)\b/i.test(chunk.toString())) {
+        if (label === "stderr") stderrTail = (stderrTail + text).slice(-65536);
+        readinessTail = (readinessTail + text).slice(-2048);
+        if (!backendAnnouncedReady && /\bdsh web:\s*http/i.test(readinessTail)) {
+          backendAnnouncedReady = true;
+          log("backend service-announced after " + (Date.now() - spawnStartedAt) + "ms");
+        }
+        if (!backendStartupSettled && /\[dsh-startup\] compile cache flushed/.test(readinessTail)) {
+          backendStartupSettled = true;
+          log("backend startup-settled after " + (Date.now() - spawnStartedAt) + "ms");
+        }
+        if (readyKeywordAt === null && /\b(listening|started|ready)\b/i.test(text)) {
           readyKeywordAt = Date.now();
           log("backend ready-keyword after " + (readyKeywordAt - spawnStartedAt) + "ms");
         }
@@ -385,7 +438,7 @@ const startBackend = (attempt) => {
   let lastLoadingUpdateMs = 0;
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 250));
-    if (await portOpen(3080)) {
+    if (backendAnnouncedReady && backendStartupSettled && await portOpen(3080)) {
       backendReady = true;
       backendReadyAt = Date.now();
       log("backend ready after " + ((i + 1) * 250) + "ms");
@@ -397,7 +450,8 @@ const startBackend = (attempt) => {
       lastLoadingUpdateMs = elapsedMs;
       const seconds = Math.floor(elapsedMs / 1000);
       const slowHint = seconds > 60 ? "，启动较慢，可能被杀毒软件扫描拖慢" : "";
-      mainWindow.webContents.executeJavaScript(`
+      const loadingContents = startupWebContents();
+      if (loadingContents) loadingContents.executeJavaScript(`
         (function () {
           var detail = document.querySelector('[data-detail]');
           if (detail) detail.textContent = '首次启动可能需要约一分钟，已等待 ' + ${seconds} + ' 秒' + ${JSON.stringify(slowHint)};
@@ -1042,6 +1096,128 @@ function updateMaximizedChrome(maximized) {
   }
 }
 
+function layoutStartupOverlay() {
+  if (!mainWindow || mainWindow.isDestroyed() || !startupView) return;
+  const { width, height } = mainWindow.getContentBounds();
+  startupView.setBounds({ x: 0, y: 0, width, height });
+}
+
+function createStartupOverlay() {
+  startupView = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  startupView.setBackgroundColor("#00000000");
+  mainWindow.contentView.addChildView(startupView);
+  layoutStartupOverlay();
+  startupView.webContents.loadFile(path.join(__dirname, "loading.html"))
+    .catch((e) => log("startup overlay error: " + e.message));
+}
+
+function startupWebContents() {
+  if (startupView && !startupView.webContents.isDestroyed()) return startupView.webContents;
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow.webContents;
+  return null;
+}
+
+async function waitForBackendPaint() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const paintState = await mainWindow.webContents.executeJavaScript(`
+    new Promise((resolve) => {
+      const startedAt = performance.now();
+      const deadline = performance.now() + 1500;
+      const inspect = () => {
+        const body = document.body;
+        const root = body && (body.querySelector('#root') || body);
+        const textLength = root ? root.innerText.trim().length : 0;
+        const buttonCount = root ? root.querySelectorAll('button').length : 0;
+        const hasEditor = Boolean(root && [...root.querySelectorAll(
+          'textarea, [contenteditable="true"], [role="textbox"]'
+        )].some((element) => {
+          const label = [
+            element.getAttribute('aria-label'),
+            element.getAttribute('placeholder'),
+            element.getAttribute('data-placeholder'),
+          ].filter(Boolean).join(' ');
+          return element.tagName === 'TEXTAREA' || element.isContentEditable
+            || /消息|message|智能体/i.test(label);
+        }));
+        const ready = textLength > 40 && buttonCount >= 3 && hasEditor;
+        const timedOut = performance.now() >= deadline;
+        if (ready || timedOut) {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+            elapsedMs: Math.round(performance.now() - startedAt),
+            timedOut,
+            textLength,
+            buttonCount,
+            hasEditor,
+          })));
+          return;
+        }
+        setTimeout(inspect, 50);
+      };
+      inspect();
+    })
+  `).catch((e) => log("backend paint wait failed: " + e.message));
+  if (paintState) log("backend paint-ready " + JSON.stringify(paintState));
+}
+
+async function transitionToBackend() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  startupEntryArmed = true;
+  let navigationFailed = false;
+  const prepared = new Promise((resolve) => { backendPagePreparedResolve = resolve; });
+  mainWindow.loadURL(URL).catch((e) => {
+    navigationFailed = true;
+    log("load error: " + e.message);
+    if (backendPagePreparedResolve) backendPagePreparedResolve();
+  });
+  let preparedTimer;
+  await Promise.race([
+    prepared,
+    new Promise((resolve) => { preparedTimer = setTimeout(resolve, 4000); }),
+  ]);
+  clearTimeout(preparedTimer);
+  backendPagePreparedResolve = null;
+  if (navigationFailed || !mainWindow || mainWindow.isDestroyed()) return;
+  revealBackendEntry();
+  let paintFallbackTimer;
+  await Promise.race([
+    waitForBackendPaint(),
+    new Promise((resolve) => {
+      paintFallbackTimer = setTimeout(() => {
+        log("backend paint-ready main-process fallback after 1600ms");
+        resolve();
+      }, 1600);
+    }),
+  ]);
+  clearTimeout(paintFallbackTimer);
+  if (!startupView || startupView.webContents.isDestroyed()) return;
+  const transition = startupView.webContents.executeJavaScript(`
+    typeof window.dshBeginStartupExit === 'function'
+      ? window.dshBeginStartupExit()
+      : Promise.resolve()
+  `).catch((e) => log("startup exit transition failed: " + e.message));
+  let fallbackTimer;
+  await Promise.race([
+    transition,
+    new Promise((resolve) => { fallbackTimer = setTimeout(resolve, 560); }),
+  ]);
+  clearTimeout(fallbackTimer);
+  if (mainWindow && !mainWindow.isDestroyed() && startupView) {
+    const completedView = startupView;
+    startupView = null;
+    mainWindow.contentView.removeChildView(completedView);
+    if (!completedView.webContents.isDestroyed()) completedView.webContents.close();
+  }
+}
+
+async function revealBackendEntry() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  await mainWindow.webContents.executeJavaScript(`
+    document.documentElement.classList.add('dsh-startup-entered')
+  `).catch((e) => log("startup entry transition failed: " + e.message));
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -1055,22 +1231,34 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
       preload: path.join(__dirname, "preload.js"),
     },
   });
   mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
+  createStartupOverlay();
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
   mainWindow.webContents.on("dom-ready", async () => {
+    const backendDocument = mainWindow && !mainWindow.isDestroyed()
+      && mainWindow.webContents.getURL().startsWith(URL);
+    if (backendDocument) {
+      if (backendPagePreparedResolve) backendPagePreparedResolve();
+      revealBackendEntry();
+    }
+    const injectionStartedAt = Date.now();
     try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
     try { await injectDesktopTweaks(); } catch (e) { log("desktop tweaks error: " + e.message); }
     try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
+    if (backendDocument) log("backend injections finished after " + (Date.now() - injectionStartedAt) + "ms");
   });
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
+  mainWindow.on("resize", layoutStartupOverlay);
   mainWindow.on("closed", () => {
     stopControlsMotion();
     mainWindow = null;
     controlsView = null;
+    startupView = null;
     // v3.1.2-deep：杀整棵进程树（含 esbuild/ripgrep 等子进程），防退出挂起
     isQuitting = true;
     killBackendTree();
@@ -1236,7 +1424,8 @@ if (hasSingleInstanceLock) {
     if (!ok) {
       log("backend failed");
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.executeJavaScript(`
+        const loadingContents = startupWebContents();
+        if (loadingContents) loadingContents.executeJavaScript(`
           document.querySelector('[data-status]').textContent = '启动失败，请关闭后重试';
           document.querySelector('[data-detail]').textContent = 'DeepSeek Harness 后端未能在 150 秒内启动。';
           document.querySelector('.spinner').hidden = true;
@@ -1245,7 +1434,7 @@ if (hasSingleInstanceLock) {
       return;
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadURL(URL).catch((e) => log("load error: " + e.message));
+      await transitionToBackend();
     }
   });
 }

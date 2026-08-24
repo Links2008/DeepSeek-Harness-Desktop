@@ -11,6 +11,9 @@ files:
   - deepseek_whale_hermes_rounded.png
   - package.json
   - scripts/patch-harness-runtime.cjs
+  - scripts/prepare-compile-cache.cjs
+  - scripts/prepare-profile-prebundles.cjs
+  - scripts/prebundle-runtime-startup.cjs
 extraResources:
   - from: bundle/node/node.exe
     to: node/node.exe
@@ -22,6 +25,10 @@ extraResources:
       - "**/*"
       - "!**/*.map"
       - "!**/*.d.ts"
+  - from: bundle/node-compile-cache
+    to: node-compile-cache
+    filter:
+      - "**/*"
 win:
   target:
     - target: nsis

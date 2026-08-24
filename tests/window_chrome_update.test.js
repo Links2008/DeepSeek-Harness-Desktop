@@ -12,7 +12,8 @@ const workflowPath = path.join(root, ".github", "workflows", "upstream-sync.yml"
 
 assert.match(main, /show:\s*true/, "v2 must show its native-color window immediately");
 assert.match(main, /transparent:\s*false/);
-assert.match(main, /backgroundColor:\s*APP_BG/);
+assert.match(main, /backgroundColor:\s*nativeTheme\.shouldUseDarkColors\s*\?\s*["']#121214["']\s*:\s*["']#f9fafb["']/,
+  "the startup surface must follow the current Windows light/dark preference");
 assert.doesNotMatch(main, /WIN_RADIUS|--dsh-window-radius|clip-path:\s*inset/, "the shell must not impose custom rounded corners");
 assert.match(main, /dom-ready/, "chrome must be installed as soon as the web UI is available");
 assert.doesNotMatch(main, /ready-to-show|revealWhenReady|window reveal fallback/);
@@ -24,7 +25,8 @@ assert.match(main, /second-instance/, "the primary instance must handle a repeat
 assert.match(main, /isMinimized\(\)[\s\S]*restore\(\)[\s\S]*focus\(\)/, "a repeated launch must restore and focus the existing window");
 assert.match(main, /isDshBackend/, "an occupied 3080 port must be verified before reuse");
 assert.match(main, /occupied by a non-Harness service/, "foreign services on 3080 must fail clearly instead of being opened");
-assert.doesNotMatch(main, /loadFile\([^)]*loading\.html/, "v2 startup must not show a loading animation or loading page");
+assert.match(main, /loadFile\([^)]*loading\.html/,
+  "v3.2 must show its local startup surface while the independent backend initializes");
 assert.match(main, /const backendPromise = ensureDshBackend\(\);[\s\S]*createWindow\(\);[\s\S]*await backendPromise/, "backend startup and immediate window creation should overlap");
 assert.match(main, /CONTROL_COLLAPSED_X\s*=\s*4/, "collapsed controls must stay inside the 56px rail");
 assert.match(main, /CONTROL_Y\s*=\s*3/, "controls must sit slightly lower");

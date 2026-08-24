@@ -39,7 +39,14 @@
       display: grid; place-items: center; background: var(--bg); color: var(--fg);
       font: 14px/1.5 "Segoe UI", "Microsoft YaHei UI", sans-serif;
     }
-    main { display: grid; justify-items: center; gap: 22px; text-align: center; }
+    main {
+      display: grid; justify-items: center; gap: 22px; text-align: center;
+      transition: opacity 280ms cubic-bezier(.23, 1, .32, 1), transform 280ms cubic-bezier(.23, 1, .32, 1);
+    }
+    body.is-exiting main {
+      opacity: .12;
+      transform: translateY(-10px) scale(.985);
+    }
 
     .logo-stage {
       position: relative; display: grid; place-items: center;
@@ -69,9 +76,22 @@
     [data-detail] { margin: 0; color: var(--muted); font-size: 13px; }
 
     .spinner {
-      width: 22px; height: 22px; border-radius: 50%;
+      position: relative; width: 22px; height: 22px; border-radius: 50%;
       border: 2px solid var(--spinner-track); border-top-color: var(--brand);
       animation: spin 800ms linear infinite;
+      transition: border-color 140ms linear, transform 180ms cubic-bezier(.23, 1, .32, 1);
+    }
+    .spinner::after {
+      content: ""; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px;
+      border-right: 2px solid var(--fg); border-bottom: 2px solid var(--fg);
+      opacity: 0; transform: rotate(45deg) scale(.55);
+      transition: opacity 120ms linear, transform 180ms cubic-bezier(.23, 1, .32, 1);
+    }
+    body.is-complete .spinner {
+      animation: none; border-color: var(--brand); transform: scale(1.08);
+    }
+    body.is-complete .spinner::after {
+      opacity: 1; transform: rotate(45deg) scale(1);
     }
 
     @keyframes halo {
@@ -90,6 +110,8 @@
     @media (prefers-reduced-motion: reduce) {
       .logo-stage::before, .logo-stage::after, .logo, .copy { animation: none; }
       .spinner { animation: none; }
+      main { transition-duration: 50ms; }
+      body.is-exiting main { transform: none; }
     }
   </style>
 </head>
@@ -104,5 +126,31 @@
     </div>
     <div class="spinner" aria-label="正在加载"></div>
   </main>
+  <script>
+    window.dshBeginStartupExit = () => {
+      if (window.dshStartupExitPromise) return window.dshStartupExitPromise;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const status = document.querySelector("[data-status]");
+      const detail = document.querySelector("[data-detail]");
+      if (status) status.textContent = "启动完成";
+      if (detail) detail.textContent = "正在进入工作区";
+      document.body.classList.add("is-complete");
+      const completionHoldMs = reducedMotion ? 0 : 180;
+      window.dshStartupExitPromise = new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        window.setTimeout(() => {
+          document.body.classList.add("is-exiting");
+          document.querySelector("main")?.addEventListener("transitionend", finish, { once: true });
+          window.setTimeout(finish, reducedMotion ? 80 : 320);
+        }, completionHoldMs);
+      });
+      return window.dshStartupExitPromise;
+    };
+  </script>
 </body>
 </html>
