@@ -100,6 +100,8 @@ assert.equal(typeof compileCache.prepareCompileCache, "function",
   "the cache seeding helper must be independently regression-testable");
 assert.equal(typeof prebundle.prebundleRuntime, "function",
   "the runtime leaf prebundler must be independently callable by the build prewarm step");
+assert.match(prebundleSource, /require\(["']esbuild["']\)/,
+  "the prebundler must use the desktop's declared build dependency instead of borrowing one from the runtime");
 assert.equal(typeof profilePrebundle.prepareProfilePrebundles, "function",
   "profile dependencies must have a fingerprinted one-time prebundle path");
 assert.match(main, /prepareProfilePrebundles/,

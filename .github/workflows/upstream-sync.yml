@@ -288,7 +288,18 @@ jobs:
           $notes = if (Test-Path $notesPath) {
             Get-Content $notesPath -Raw
           } else {
-            "Automated desktop release for DeepSeek Harness ${{ steps.release.outputs.upstream_version }}."
+            $upstreamTag = 'dsh-v${{ steps.release.outputs.upstream_version }}'
+            $upstreamRelease = gh api "repos/deepseek-ai/deepseek-harness/releases/tags/$upstreamTag" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamRelease.body)) {
+              throw "Missing $notesPath and official release notes for $upstreamTag; refusing to publish a tag without update content"
+            }
+            @(
+              "# DeepSeek Harness Desktop $tag"
+              ''
+              "Includes official DeepSeek Harness ${{ steps.release.outputs.upstream_version }}."
+              ''
+              $upstreamRelease.body
+            ) -join [Environment]::NewLine
           }
           $markdownTick = [char]96
           $verificationLines = @(

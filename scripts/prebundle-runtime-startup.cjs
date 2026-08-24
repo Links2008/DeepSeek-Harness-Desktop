@@ -62,7 +62,7 @@ async function buildEntry(esbuild, spec) {
 }
 
 async function prebundleRuntime() {
-  const esbuild = require(path.join(modules, "esbuild"));
+  const esbuild = require("esbuild");
   const piAiDir = packageRoot("@earendil-works/pi-ai");
   const piAiManifestPath = path.join(piAiDir, "package.json");
   const piAiManifest = JSON.parse(fs.readFileSync(piAiManifestPath, "utf8"));

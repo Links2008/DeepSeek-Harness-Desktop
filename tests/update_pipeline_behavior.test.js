@@ -32,6 +32,8 @@ assert.match(workflow, /installer_sha256[\s\S]*SHA-256/, "each release must publ
 assert.match(workflow, /version -eq '2\.1\.0'\) \{ 'v2\.1' \}/, "desktop 2.1.0 must publish under the requested v2.1 tag");
 assert.equal((workflow.match(/-eq '2\.1\.0'\) \{ 'v2\.1' \}/g) || []).length, 2, "release inspection and publication must agree on v2.1");
 assert.match(workflow, /release-notes-\$tag\.md/, "the release must load a structured version-specific description");
+assert.match(workflow, /deepseek-ai\/deepseek-harness\/releases\/tags\/\$upstreamTag/, "missing version notes must fall back to the official upstream release notes");
+assert.doesNotMatch(workflow, /Automated desktop release for DeepSeek Harness/, "a published tag must not fall back to a one-line placeholder");
 assert.match(workflow, /upstream-lock\.json[\s\S]*release\.outputs\.sha/, "the packaged runtime lock must match the selected upstream commit");
 assert.match(verifier, /VersionInfo[\s\S]*FileVersion/, "the installed executable version must match the release");
 assert.match(verifier, /Get-StartApps[\s\S]*com\.deepseek\.dsh/, "the installed shortcut AppID must own notifications");
@@ -39,6 +41,7 @@ assert.match(verifier, /for \(\$attempt = 0; \$attempt -lt 10; \$attempt\+\+\)[\
 assert.match(verifier, /portReleased|Port 3080 remained open/, "process cleanup must prove the backend port closed");
 assert.match(workflow, /release download[\s\S]*latest\.yml[\s\S]*publishedMetadata/, "existing release metadata must be inspected before a no-op");
 assert.match(verifier, /RUNNER_TEMP[\s\S]*\/D=/, "CI installation must be isolated under the runner temporary directory");
+assert.match(verifier, /GetTempPath/, "local release acceptance must fall back safely when RUNNER_TEMP is unavailable");
 assert.match(verifier, /try\s*\{[\s\S]*finally\s*\{/, "runtime cleanup must run even after an acceptance failure");
 assert.match(verifier, /7-Zip rejected[\s\S]*try\s*\{[\s\S]*Start-Process \$installerPath[\s\S]*finally\s*\{/, "installer failures must also enter the cleanup boundary");
 assert.match(verifier, /--version[\s\S]*ExpectedRuntimeVersion/, "the installed Harness CLI version must match the upstream lock");

@@ -26,7 +26,8 @@ function Stop-InstalledProcesses {
 }
 
 $installerPath = (Resolve-Path $Installer).Path
-$installRoot = Join-Path $env:RUNNER_TEMP "DeepSeekHarness-$ExpectedVersion"
+$acceptanceTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$installRoot = Join-Path $acceptanceTemp "DeepSeekHarness-$ExpectedVersion"
 $appPath = Join-Path $installRoot 'DeepSeekHarness.exe'
 $accepted = $false
 $cleanupProblems = [Collections.Generic.List[string]]::new()
