@@ -13,6 +13,8 @@
   <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases"><img src="https://img.shields.io/github/downloads/Links2008/DeepSeek-Harness-Desktop/total?style=flat-square" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&style=flat-square" alt="Windows 10 and 11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-31c854?style=flat-square" alt="MIT License"></a>
+  <a href="https://www.dsh.so/artifact/deepseek-harness-desktop-15"><img src="https://www.dsh.so/badge/deepseek-harness-desktop-15.svg" alt="dsh.so security"></a>
+  <a href="https://www.dsh.so/artifact/deepseek-harness-desktop-15"><img src="https://www.dsh.so/badge/install/deepseek-harness-desktop-15.svg" alt="dsh.so install"></a>
 </p>
 
 <p align="center">
@@ -22,6 +24,9 @@
   · <a href="#自动更新">自动更新</a>
   · <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/issues">问题反馈</a>
 </p>
+
+> [!NOTE]
+> **本项目已被 [dsh.so 插件市场](https://www.dsh.so/zh/artifact/deepseek-harness-desktop-15)收录。** 上方官方徽章会实时展示安全扫描与安装验证状态；检测结果公开可查，请点击徽章确认当前状态后使用。
 
 > [!IMPORTANT]
 > 如果你觉得本项目对你有帮助，请点 ⭐ Star 支持一下，对项目曝光很重要。
