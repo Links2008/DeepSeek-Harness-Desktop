@@ -45,11 +45,30 @@ function Invoke-ElectronNode {
   }
 }
 
+function Start-DesktopApp {
+  param([string]$AppPath)
+  $stdout = [IO.Path]::GetTempFileName()
+  $stderr = [IO.Path]::GetTempFileName()
+  $previous = $env:ELECTRON_RUN_AS_NODE
+  try {
+    # Start-Process inherits the current environment. The acceptance probes use
+    # Electron as Node, but the GUI process must never inherit that switch.
+    Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+    $process = Start-Process $AppPath -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
+  } finally {
+    if ($null -eq $previous) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
+    else { $env:ELECTRON_RUN_AS_NODE = $previous }
+  }
+}
+
 $installerPath = (Resolve-Path $Installer).Path
 $acceptanceTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $installRoot = Join-Path $acceptanceTemp "DeepSeekHarness-$ExpectedVersion"
 $appPath = Join-Path $installRoot 'DeepSeekHarness.exe'
 $accepted = $false
+$desktop = $null
 $cleanupProblems = [Collections.Generic.List[string]]::new()
 
 if (Test-Path -LiteralPath $installRoot) { throw "Temporary install root already exists: $installRoot" }
@@ -96,10 +115,11 @@ try {
   }
   if (!$registeredApp) { throw 'Start Menu AppID com.deepseek.dsh is not registered' }
 
-  Start-Process $appPath -WindowStyle Hidden
+  $desktop = Start-DesktopApp $appPath
   $ready = $false
   for ($attempt = 0; $attempt -lt 75; $attempt++) {
     Start-Sleep -Seconds 2
+    if ($desktop.Process.HasExited) { break }
     try {
       $response = Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 3
       if ($response.StatusCode -eq 200 -and $response.Content -match '<title>\s*DeepSeek Harness\s*</title>') {
@@ -109,6 +129,13 @@ try {
     } catch {}
   }
   if (!$ready) {
+    if ($desktop.Process.HasExited) {
+      $desktopStdout = Get-Content -LiteralPath $desktop.Stdout -Raw -ErrorAction SilentlyContinue
+      $desktopStderr = Get-Content -LiteralPath $desktop.Stderr -Raw -ErrorAction SilentlyContinue
+      Write-Host "----- desktop stdout -----`n$desktopStdout"
+      Write-Host "----- desktop stderr -----`n$desktopStderr"
+      Write-Host "desktop process exited with code $($desktop.Process.ExitCode) before HTTP readiness"
+    }
     foreach ($logName in @('dsh_desktop.log', 'dsh_backend.log')) {
       $logPath = Join-Path $env:APPDATA "DeepSeekHarness\$logName"
       if (Test-Path -LiteralPath $logPath) {
@@ -123,6 +150,10 @@ try {
   $accepted = $true
 } finally {
   Stop-InstalledProcesses $installRoot
+  if ($desktop) {
+    try { $desktop.Process.Dispose() } catch {}
+    Remove-Item -LiteralPath $desktop.Stdout, $desktop.Stderr -Force -ErrorAction SilentlyContinue
+  }
   $portReleased = $false
   for ($attempt = 0; $attempt -lt 20; $attempt++) {
     Start-Sleep -Milliseconds 500

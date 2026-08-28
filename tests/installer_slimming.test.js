@@ -37,5 +37,10 @@ assert.doesNotMatch(workflow, /Copy-Item \(Get-Command node\.exe\)\.Source bundl
   "CI must not assemble a Node payload that the v4 installer no longer uses");
 assert.match(verifier, /Invoke-ElectronNode[\s\S]*ELECTRON_RUN_AS_NODE/,
   "installed acceptance must run the packaged executable in Node mode");
+assert.match(verifier,
+  /function Start-DesktopApp[\s\S]*Remove-Item Env:ELECTRON_RUN_AS_NODE[\s\S]*Start-Process \$AppPath[\s\S]*-PassThru/,
+  "desktop acceptance must launch outside Electron Node mode and retain the process handle");
+assert.match(verifier, /\.Process\.HasExited[\s\S]*desktop process exited/,
+  "desktop acceptance must fail fast with process diagnostics when Electron exits before HTTP readiness");
 
 console.log("installer slimming contract verified");
