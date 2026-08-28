@@ -109,9 +109,9 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 桌面版本 | `4.0.0` |
-| Harness 版本 | `0.1.1-rc.2` |
+| Harness 版本 | 见 [`upstream-lock.json`](upstream-lock.json) |
 | 上游分支 | `master` |
-| 锁定提交 | [`b150a55`](https://github.com/deepseek-ai/deepseek-harness/commit/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e) |
+| 锁定提交 | 见 [`upstream-lock.json`](upstream-lock.json) |
 | 状态文件 | [`upstream-lock.json`](upstream-lock.json) |
 
 ## 从源码构建
