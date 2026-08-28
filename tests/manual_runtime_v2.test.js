@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(
 );
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-assert.match(pkg.version, /^3\.\d+\.\d+$/, "the release must remain on the stable v3 desktop line");
+assert.match(pkg.version, /^4\.\d+\.\d+$/, "the release must remain on the stable v4 desktop line");
 
 assert.doesNotMatch(main, /scheduleAutoUpdates/, "updates must only start from the existing check-update button");
 assert.doesNotMatch(main, /setInterval\s*\(\s*checkForUpdates/);
@@ -47,6 +47,17 @@ assert.doesNotMatch(controls, /checkUpdate|检查更新/, "the top overlay must 
 
 assert.doesNotMatch(main, /dsh-update-label/, "the update button must stay icon-only");
 assert.match(main, /dataset\.dshEntryRow/, "the plugin rail row must be tagged so both buttons share one spec");
+assert.match(main, /data-dsh-store-entry/, "the home sidebar must keep its top-level plugin store entry");
+assert.match(main, /data-dsh-market-root/,
+  "the top-level store entry must verify that DSH Market actually rendered");
+assert.match(main, /marketTabs\[attempts\s*%\s*marketTabs\.length\]\.click\(\)/,
+  "duplicate market labels must be tried in turn until the DSH Market root appears");
+assert.match(main, /function storeInsertionPoint\(\)/,
+  "the store entry must resolve an insertion point when Better Sidebar has no SSH button");
+assert.match(main, /settingsButton\.parentElement\.parentElement/,
+  "the semantic settings area must be the stable fallback anchor");
+assert.match(main, /target\.parent\.insertBefore\(entry, target\.before\)/,
+  "the store entry must be inserted through either the SSH or settings fallback anchor");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?width:\s*36px\s*!important/, "rail buttons share one width");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?height:\s*36px\s*!important/, "rail buttons share one height");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?border-radius:\s*50%\s*!important/, "rail buttons are circular ghost buttons");

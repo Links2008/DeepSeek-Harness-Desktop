@@ -21,6 +21,19 @@ function packageRoot(profileDir, name) {
   return path.join(profileDir, "node_modules", ...name.split("/"));
 }
 
+function unpackedAsarPath(file, exists = fs.existsSync) {
+  const unpacked = file.replace(/\.asar([\\/])/, ".asar.unpacked$1");
+  return unpacked !== file && exists(unpacked) ? unpacked : null;
+}
+
+function configurePackagedEsbuildBinary() {
+  if (process.platform !== "win32") return null;
+  const resolved = require.resolve("@esbuild/win32-x64/esbuild.exe");
+  const unpacked = unpackedAsarPath(resolved);
+  if (unpacked) process.env.ESBUILD_BINARY_PATH = unpacked;
+  return unpacked;
+}
+
 function specsFor(profileDir) {
   const spec = (name, entry, outfile, format, patchManifest, buildOptions = {}) => ({
     name,
@@ -31,7 +44,7 @@ function specsFor(profileDir) {
     patchManifest,
     buildOptions,
   });
-  return [
+  const specs = [
     spec("undici", "index.js", "index.dsh-prebundle.cjs", "cjs",
       (manifest, target) => { manifest.main = target; }),
     spec("zod", "index.js", "index.dsh-prebundle.js", "esm",
@@ -66,6 +79,9 @@ function specsFor(profileDir) {
         manifest.exports["."].require = target;
       }),
   ];
+  return specs.filter((item) =>
+    fs.existsSync(path.join(item.root, "package.json"))
+      && fs.existsSync(path.join(item.root, item.entry)));
 }
 
 function readMarker(markerPath) {
@@ -130,7 +146,8 @@ async function prepareProfilePrebundles({ profileDir, runtimeRoot, stateDir, onL
   }
 
   fs.mkdirSync(stateDir, { recursive: true });
-  const esbuild = require(path.join(runtimeRoot, "node_modules", "esbuild"));
+  configurePackagedEsbuildBinary();
+  const esbuild = require("esbuild");
   const manifests = manifestTargets(specs);
   const staging = [];
   try {
@@ -198,4 +215,10 @@ if (require.main === module) {
     .catch((error) => { process.stderr.write(`${error.stack || error.message}\n`); process.exitCode = 1; });
 }
 
-module.exports = { PREBUNDLE_VERSION, prepareProfilePrebundles, profileFingerprint };
+module.exports = {
+  PREBUNDLE_VERSION,
+  prepareProfilePrebundles,
+  profileFingerprint,
+  specsFor,
+  unpackedAsarPath,
+};

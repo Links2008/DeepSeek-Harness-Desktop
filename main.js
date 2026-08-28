@@ -23,8 +23,8 @@ const CONTROL_EXPANDED_X = 23;
 const CONTROL_Y = 3;
 const CONTROL_MOTION_MS = 160;
 let dshProc = null;
-// v3.1.2-deep：更新/退出状态。更新时杀后端会触发 exit→respawn 恶性循环
-// （后端重启→node.exe 重新锁住安装目录→NSIS 无法替换文件→"无法关闭"死循环），
+// 更新/退出状态。更新时杀后端会触发 exit→respawn 恶性循环
+// （后端重启→运行时重新锁住安装目录→NSIS 无法替换文件→"无法关闭"死循环），
 // isQuitting 用于阻断 respawn；pendingInstallerPath 供看门狗兜底拉起安装器。
 let isQuitting = false;
 let pendingInstallerPath = null;
@@ -45,7 +45,7 @@ function killBackendTree() {
         { windowsHide: true, stdio: "ignore", timeout: 15000 }
       );
     } catch (e) {}
-    // 兜底：杀掉所有从本安装目录启动的 node 进程（按路径过滤，不误杀其他 node）
+    // v3 升级兼容：清理旧版本从安装目录启动的独立 node，不误杀其它 Node。
     try {
       const instDir = path.dirname(process.execPath).replace(/'/g, "''");
       require("child_process").spawnSync(
@@ -68,6 +68,7 @@ let controlsMotionTimer = null;
 let lastExpanded = null;
 let startupEntryArmed = false;
 let backendPagePreparedResolve = null;
+let backendNavigationPromise = null;
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -246,19 +247,20 @@ function initializeUpdater() {
 
 function resolveBackend() {
   const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
-  const bundledNode = path.join(process.resourcesPath, "node", "node.exe");
   const bundledCli = path.join(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
   const compileCache = prepareCompileCache(app.getPath("userData"), process.resourcesPath);
   if (!compileCache.packaged) log("packaged compile cache unavailable, using user-data fallback: " + compileCache.error.message);
-  if (fs.existsSync(bundledNode) && fs.existsSync(bundledCli)) {
+  if (app.isPackaged && fs.existsSync(bundledCli)) {
     return {
-      command: bundledNode,
-      args: [bundledCli, "web", "--host", "127.0.0.1", "--port", "3080"],
+      command: process.execPath,
+      args: ["--expose-internals", bundledCli, "web", "--no-open", "--host", "127.0.0.1", "--port", "3080"],
       cwd: runtimeRoot,
       env: {
+        ELECTRON_RUN_AS_NODE: "1",
         NODE_COMPILE_CACHE: compileCache.dir,
         NODE_COMPILE_CACHE_PORTABLE: "1",
         DSH_TELEMETRY_DISABLED: "1",
+        DSH_STARTUP_DIAGNOSTICS: "1",
       },
     };
   }
@@ -379,6 +381,18 @@ const startBackend = (attempt) => {
       );
       log("spawned backend pid=" + dshProc.pid + " attempt=" + attempt);
       const spawnStartedAt = Date.now();
+      const spawnedBackend = dshProc;
+      void (async () => {
+        for (let i = 0; i < 3000; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          if (dshProc !== spawnedBackend || spawnedBackend.exitCode !== null) return;
+          if (await portOpen(3080, 100)) {
+            log("backend port-open after " + (Date.now() - spawnStartedAt) + "ms");
+            void startBackendNavigation();
+            return;
+          }
+        }
+      })();
       let firstOutputAt = null;
       let readyKeywordAt = null;
       let readinessTail = "";
@@ -795,6 +809,19 @@ async function injectDesktopTweaks() {
       function sidebarColumn() {
         return document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]');
       }
+      function findSettingsButton() {
+        var column = sidebarColumn();
+        var matches = column
+          ? Array.prototype.slice.call(column.querySelectorAll('button[aria-haspopup="dialog"]'))
+          : [];
+        if (matches.length === 0) {
+          matches = Array.prototype.slice.call(document.querySelectorAll('button[aria-haspopup="dialog"]'));
+        }
+        if (matches.length === 0) return null;
+        return matches.slice().sort(function (a, b) {
+          return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
+        })[0];
+      }
       function findSshButton() {
         var scopes = [sidebarColumn(), document];
         for (var i = 0; i < scopes.length; i++) {
@@ -808,44 +835,54 @@ async function injectDesktopTweaks() {
         }
         return null;
       }
-      function openStore() {
-        function findSettingsButton() {
-          var column = sidebarColumn();
-          var matches = column
-            ? Array.prototype.slice.call(column.querySelectorAll('button[aria-haspopup="dialog"]'))
-            : [];
-          if (matches.length === 0) {
-            matches = Array.prototype.slice.call(document.querySelectorAll('button[aria-haspopup="dialog"]'));
-          }
-          if (matches.length === 0) return null;
-          return matches.slice().sort(function (a, b) {
-            return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
-          })[0];
+      function storeInsertionPoint() {
+        var sshButton = findSshButton();
+        if (sshButton && sshButton.parentElement) {
+          return { parent: sshButton.parentElement, before: sshButton.nextSibling };
         }
-        function findMarketplaceTab(scope) {
+        // Better Sidebar 当前版本不再渲染 SSH；以语义稳定的设置区作为首页回退锚点。
+        var settingsButton = findSettingsButton();
+        if (settingsButton && settingsButton.parentElement && settingsButton.parentElement.parentElement) {
+          return { parent: settingsButton.parentElement.parentElement, before: settingsButton.parentElement };
+        }
+        return null;
+      }
+      function openStore() {
+        function findMarketplaceTabs(scope) {
           var candidates = Array.prototype.slice.call((scope || document).querySelectorAll('[role="tab"], button'));
           var labels = ['插件市场', 'Plugin Market', 'DSH插件市场', 'DSH Plugin Marketplace'];
+          var matches = [];
           for (var i = 0; i < labels.length; i++) {
-            var found = candidates.find(function (b) { return (b.textContent || '').trim() === labels[i]; });
-            if (found) return found;
+            candidates.forEach(function (button) {
+              if ((button.textContent || '').trim() === labels[i] && matches.indexOf(button) === -1) matches.push(button);
+            });
           }
-          return candidates.find(function (b) { return /插件市场|plugin\\s*market/i.test((b.textContent || '').trim()); });
+          candidates.forEach(function (button) {
+            if (/插件市场|plugin\\s*market/i.test((button.textContent || '').trim()) && matches.indexOf(button) === -1) matches.push(button);
+          });
+          return matches;
         }
-        function tryClickMarketplaceTab() {
+        function dshMarketReady() {
+          return Boolean(document.querySelector('[data-dsh-market-root]'));
+        }
+        function tryClickDshMarket(attempts) {
+          if (dshMarketReady()) return true;
           var dialog = document.querySelector('div[role="dialog"][aria-modal="true"]') || document.querySelector('[role="dialog"]');
           if (!dialog) return false;
-          var tab = findMarketplaceTab(dialog);
-          if (!tab) return false;
-          tab.click();
-          return true;
+          var marketTabs = findMarketplaceTabs(dialog);
+          if (marketTabs.length === 0) return false;
+          marketTabs[attempts % marketTabs.length].click();
+          return dshMarketReady();
         }
-        if (tryClickMarketplaceTab()) return;
+        if (dshMarketReady()) return;
         var settingsButton = findSettingsButton();
-        if (!settingsButton) return;
-        settingsButton.click();
-        var tries = 0;
+        if (!document.querySelector('[role="dialog"]')) {
+          if (!settingsButton) return;
+          settingsButton.click();
+        }
+        var attempts = 0;
         var timer = setInterval(function () {
-          if (tryClickMarketplaceTab() || ++tries > 20) clearInterval(timer);
+          if (tryClickDshMarket(attempts) || ++attempts > 24) clearInterval(timer);
         }, 250);
       }
       function syncStoreIcon() {
@@ -870,8 +907,8 @@ async function injectDesktopTweaks() {
       function ensureStoreEntry() {
         var existing = document.querySelector('[data-dsh-store-entry]');
         if (!existing || !existing.isConnected) {
-          var sshBtn = findSshButton();
-          if (!sshBtn || !sshBtn.parentElement) return;
+          var target = storeInsertionPoint();
+          if (!target) return;
           var entry = document.createElement('button');
           entry.type = 'button';
           entry.dataset.dshStoreEntry = '';
@@ -883,7 +920,7 @@ async function injectDesktopTweaks() {
           var colNow = sidebarColumn();
           var wNow = colNow ? colNow.getBoundingClientRect().width : 320;
           if (wNow > 0 && wNow < 72) entry.dataset.dshIcon = '';
-          sshBtn.parentElement.insertBefore(entry, sshBtn.nextSibling);
+          target.parent.insertBefore(entry, target.before);
         }
         syncStoreIcon();
         bindStoreIconResize();
@@ -964,6 +1001,15 @@ async function injectTaskCompletionBridge() {
       scan();
     })();
   `);
+}
+
+async function runBackendInjections() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents.getURL().startsWith(URL)) return;
+  const injectionStartedAt = Date.now();
+  try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
+  try { await injectDesktopTweaks(); } catch (e) { log("desktop tweaks error: " + e.message); }
+  try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
+  log("backend injections finished after " + (Date.now() - injectionStartedAt) + "ms");
 }
 
 async function createControlsOverlay() {
@@ -1161,24 +1207,37 @@ async function waitForBackendPaint() {
   if (paintState) log("backend paint-ready " + JSON.stringify(paintState));
 }
 
-async function transitionToBackend() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function startBackendNavigation() {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve(false);
+  if (backendNavigationPromise) return backendNavigationPromise;
   startupEntryArmed = true;
-  let navigationFailed = false;
-  const prepared = new Promise((resolve) => { backendPagePreparedResolve = resolve; });
-  mainWindow.loadURL(URL).catch((e) => {
-    navigationFailed = true;
-    log("load error: " + e.message);
-    if (backendPagePreparedResolve) backendPagePreparedResolve();
+  const navigation = (async () => {
+    let navigationFailed = false;
+    const prepared = new Promise((resolve) => { backendPagePreparedResolve = resolve; });
+    log("backend navigation started behind overlay");
+    mainWindow.loadURL(URL).catch((e) => {
+      navigationFailed = true;
+      log("load error: " + e.message);
+      if (backendPagePreparedResolve) backendPagePreparedResolve();
+    });
+    let preparedTimer;
+    await Promise.race([
+      prepared,
+      new Promise((resolve) => { preparedTimer = setTimeout(resolve, 4000); }),
+    ]);
+    clearTimeout(preparedTimer);
+    backendPagePreparedResolve = null;
+    return !navigationFailed && Boolean(mainWindow && !mainWindow.isDestroyed());
+  })();
+  backendNavigationPromise = navigation;
+  void navigation.then((ready) => {
+    if (!ready && backendNavigationPromise === navigation) backendNavigationPromise = null;
   });
-  let preparedTimer;
-  await Promise.race([
-    prepared,
-    new Promise((resolve) => { preparedTimer = setTimeout(resolve, 4000); }),
-  ]);
-  clearTimeout(preparedTimer);
-  backendPagePreparedResolve = null;
-  if (navigationFailed || !mainWindow || mainWindow.isDestroyed()) return;
+  return navigation;
+}
+
+async function transitionToBackend() {
+  if (!await startBackendNavigation() || !mainWindow || mainWindow.isDestroyed()) return;
   revealBackendEntry();
   let paintFallbackTimer;
   await Promise.race([
@@ -1208,6 +1267,7 @@ async function transitionToBackend() {
     startupView = null;
     mainWindow.contentView.removeChildView(completedView);
     if (!completedView.webContents.isDestroyed()) completedView.webContents.close();
+    void runBackendInjections();
   }
 }
 
@@ -1238,18 +1298,14 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
   createStartupOverlay();
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
-  mainWindow.webContents.on("dom-ready", async () => {
+  mainWindow.webContents.on("dom-ready", () => {
     const backendDocument = mainWindow && !mainWindow.isDestroyed()
       && mainWindow.webContents.getURL().startsWith(URL);
-    if (backendDocument) {
-      if (backendPagePreparedResolve) backendPagePreparedResolve();
-      revealBackendEntry();
-    }
-    const injectionStartedAt = Date.now();
-    try { await injectWindowChrome(); } catch (e) { log("inject error: " + e.message); }
-    try { await injectDesktopTweaks(); } catch (e) { log("desktop tweaks error: " + e.message); }
-    try { await injectTaskCompletionBridge(); } catch (e) { log("completion bridge error: " + e.message); }
-    if (backendDocument) log("backend injections finished after " + (Date.now() - injectionStartedAt) + "ms");
+    if (!backendDocument) return;
+    if (backendPagePreparedResolve) backendPagePreparedResolve();
+    void revealBackendEntry();
+    if (startupView) return;
+    void runBackendInjections();
   });
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
@@ -1357,7 +1413,7 @@ ipcMain.handle("app:install-update", (event) => {
   log("installing downloaded update");
   // v3.1.2-deep：彻底修复"更新时无法关闭"。旧流程 quitAndInstall(false,true)
   // 的三层缺陷：①非静默安装器弹"无法关闭 DeepSeekHarness"+重试死循环；②后端
-  // 被杀后 respawn 逻辑 1s 内重启 node.exe 重新锁住安装目录；③残留的 esbuild/
+  // 被杀后 respawn 逻辑 1s 内重启运行时并重新锁住安装目录；③残留的 esbuild/
   // ripgrep/conpty 子进程锁文件占用端口。修复：先标记退出（阻断 respawn）→
   // 杀整棵进程树（释放文件锁与端口）→ 静默安装（无对话框）→ 看门狗兜底强退。
   isQuitting = true;

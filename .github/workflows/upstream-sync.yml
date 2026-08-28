@@ -142,9 +142,6 @@ jobs:
           $runtime.PSObject.Properties.Remove('dependencies')
           $runtime | ConvertTo-Json -Depth 10 | Set-Content package.json -Encoding utf8NoBOM
           Pop-Location
-          New-Item -ItemType Directory -Path bundle/node -Force | Out-Null
-          Copy-Item (Get-Command node.exe).Source bundle/node/node.exe
-
       - name: Build and test the desktop release
         if: steps.release.outputs.should_build == 'true'
         id: desktop

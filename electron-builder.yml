@@ -15,8 +15,6 @@ files:
   - scripts/prepare-profile-prebundles.cjs
   - scripts/prebundle-runtime-startup.cjs
 extraResources:
-  - from: bundle/node/node.exe
-    to: node/node.exe
   - from: bundle/dsh-runtime/package.json
     to: dsh-runtime/package.json
   - from: bundle/dsh-runtime/node_modules
@@ -25,6 +23,24 @@ extraResources:
       - "**/*"
       - "!**/*.map"
       - "!**/*.d.ts"
+      - "!**/*.d.mts"
+      - "!**/*.d.cts"
+      - "!**/*.ts"
+      - "!**/*.tsx"
+      - "!**/*.pdb"
+      - "!**/win32-arm64/**"
+      - "!**/win10-arm64/**"
+      - "!**/test/**"
+      - "!**/tests/**"
+      - "!**/__tests__/**"
+      - "!**/fixture/**"
+      - "!**/fixtures/**"
+      - "!**/doc/**"
+      - "!**/docs/**"
+      - "!**/example/**"
+      - "!**/examples/**"
+      - "!**/*.md"
+      - "!**/*.markdown"
   - from: bundle/node-compile-cache
     to: node-compile-cache
     filter:
@@ -36,6 +52,10 @@ win:
         - x64
   icon: deepseek_whale_hermes_rounded.ico
 electronVersion: 43.4.0
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh-TW
 artifactName: DeepSeekHarness-Setup-${version}.${ext}
 publish:
   - provider: github

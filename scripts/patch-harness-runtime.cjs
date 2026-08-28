@@ -83,6 +83,38 @@ function patchMinimalPreset(source) {
   return `${source.trimEnd()}\n\n# Internal context maintenance; these rows do not add model-facing tools.\n- id: compaction\n  name: cordis:group\n  group: true\n  isolate:\n    compaction: true\n    toolResultPruner: true\n  config:\n    - id: compaction-basic\n      name: '@deepseek-ai/dsh-compaction-basic'\n\n    - id: command-compact\n      name: '@deepseek-ai/dsh-command-compact'\n\n    - id: tool-result-pruner\n      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'\n      config:\n        thresholdChars: 8192\n        headChars: 4096\n        tailChars: 1024\n`;
 }
 
+function patchStartupDiagnostics(source) {
+  if (source.includes("structuredClone(allPatches(composed)), prepare);")) return source;
+  const clock = "\tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;\n";
+  source = source.replace(clock + "\tconst ctx = await boot(", "\tconst ctx = await boot(");
+  if (!source.includes("[dsh-startup] profile begin")) {
+    const before = "async function runProfile(options) {\n\tconst composed = composeProfile(options.profile, options.patchFiles);";
+    const after = `async function runProfile(options) {
+\tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;
+\tif (startupDiagnosticsStartedAt) process.stderr.write("[dsh-startup] profile begin after 0ms\\n");
+\tconst composed = composeProfile(options.profile, options.patchFiles);
+\tif (startupDiagnosticsStartedAt) process.stderr.write(\`[dsh-startup] profile composed after \${Date.now() - startupDiagnosticsStartedAt}ms\\n\`);`;
+    source = replaceOnce(source, before, after, "startup diagnostics phases");
+    source = replaceOnce(source, "\tapp.current = ctx;",
+      "\tif (startupDiagnosticsStartedAt) process.stderr.write(`[dsh-startup] profile boot-resolved after ${Date.now() - startupDiagnosticsStartedAt}ms\\n`);\n\tapp.current = ctx;",
+      "startup diagnostics boot resolution");
+  }
+  if (source.includes("[dsh-startup] fiber ")) return source;
+  const before = "\t\tapp.current = hostCtx;\n\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);";
+  const after = `\t\tapp.current = hostCtx;
+\t\tif (startupDiagnosticsStartedAt) hostCtx.on("internal/status", (fiber) => {
+\t\t\tif (fiber.state !== 2 && fiber.state !== 3) return;
+\t\t\ttry {
+\t\t\t\tconst state = fiber.state === 2 ? "active" : "failed";
+\t\t\t\tconst rawName = fiber.entry?.options?.name ?? fiber.runtime?.callback?.name ?? "root";
+\t\t\t\tconst name = String(rawName).replace(/[\\r\\n]+/g, " ");
+\t\t\t\tprocess.stderr.write(\`[dsh-startup] fiber \${state} after \${Date.now() - startupDiagnosticsStartedAt}ms \${name}\\n\`);
+\t\t\t} catch {}
+\t\t}, { global: true });
+\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);`;
+  return replaceOnce(source, before, after, "startup diagnostics listener");
+}
+
 function patchCompileCacheFlush(source) {
   if (source.includes("[dsh-startup] compile cache flushed")) return source;
   const before = "\tapp.current = ctx;\n\tif (!signalShutdown.signal.aborted";
@@ -201,6 +233,7 @@ function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
       const file = path.join(dshLib, name);
       const source = fs.readFileSync(file, "utf8");
       if (source.includes("\tapp.current = ctx;") || source.includes("[dsh-startup] compile cache flushed")) {
+        apply("startup-diagnostics", file, patchStartupDiagnostics);
         apply("compile-cache-flush", file, patchCompileCacheFlush);
       }
     }
@@ -227,4 +260,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };
+module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchStartupDiagnostics, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };

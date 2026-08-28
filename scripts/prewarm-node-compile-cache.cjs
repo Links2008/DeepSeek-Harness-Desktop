@@ -5,10 +5,10 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { patchHarnessRuntime } = require("./patch-harness-runtime.cjs");
 const { prebundleRuntime } = require("./prebundle-runtime-startup.cjs");
+const electron = require("electron");
 
 const root = path.resolve(__dirname, "..");
 const runtimeRoot = path.join(root, "bundle", "dsh-runtime");
-const node = path.join(root, "bundle", "node", "node.exe");
 const cli = path.join(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
 const seed = path.join(root, "bundle", "node-compile-cache");
 const stage = `${seed}.staging-${process.pid}`;
@@ -30,8 +30,8 @@ function countFiles(dir) {
 }
 
 async function main() {
-  if (!fs.existsSync(node) || !fs.existsSync(cli)) {
-    throw new Error("bundle runtime is missing; assemble bundle/node and bundle/dsh-runtime first");
+  if (!fs.existsSync(electron) || !fs.existsSync(cli)) {
+    throw new Error("build Electron or bundled DSH runtime is missing");
   }
   const prebundles = await prebundleRuntime();
   process.stdout.write(`startup prebundles ready: ${prebundles.length}\n`);
@@ -46,11 +46,12 @@ async function main() {
   const port = await freePort();
   let output = "";
   try {
-    const child = spawn(node, [cli, "web", "--host", "127.0.0.1", "--port", String(port)], {
+    const child = spawn(electron, ["--expose-internals", cli, "web", "--no-open", "--host", "127.0.0.1", "--port", String(port)], {
       cwd: runtimeRoot,
       windowsHide: true,
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
         DSH_HOME: home,
         DSH_TELEMETRY_DISABLED: "1",
         NODE_COMPILE_CACHE: stage,
@@ -95,7 +96,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack || error.message}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };

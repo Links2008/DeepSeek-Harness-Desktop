@@ -25,6 +25,26 @@ function Stop-InstalledProcesses {
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+function Invoke-ElectronNode {
+  param([string]$AppPath, [string[]]$Arguments)
+  $stdout = [IO.Path]::GetTempFileName()
+  $stderr = [IO.Path]::GetTempFileName()
+  $previous = $env:ELECTRON_RUN_AS_NODE
+  try {
+    $env:ELECTRON_RUN_AS_NODE = '1'
+    $nodeArguments = @('--expose-internals') + $Arguments
+    $child = Start-Process $AppPath -ArgumentList $nodeArguments -WindowStyle Hidden -Wait -PassThru `
+      -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $errorText = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
+    if ($child.ExitCode -ne 0) { throw "Electron Node probe exited $($child.ExitCode): $errorText" }
+    return (Get-Content -LiteralPath $stdout -Raw).Trim()
+  } finally {
+    if ($null -eq $previous) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
+    else { $env:ELECTRON_RUN_AS_NODE = $previous }
+    Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+  }
+}
+
 $installerPath = (Resolve-Path $Installer).Path
 $acceptanceTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $installRoot = Join-Path $acceptanceTemp "DeepSeekHarness-$ExpectedVersion"
@@ -56,11 +76,16 @@ try {
     throw 'Installed updater feed is incorrect'
   }
 
-  $node = Join-Path $installRoot 'resources\node\node.exe'
   $cli = Join-Path $installRoot 'resources\dsh-runtime\node_modules\@deepseek-ai\dsh\lib\bin.js'
-  $runtimeVersion = ((& $node $cli --version) -join '').Trim()
-  if ($LASTEXITCODE -ne 0 -or $runtimeVersion -ne $ExpectedRuntimeVersion) {
+  $runtimeVersion = Invoke-ElectronNode $appPath @($cli, '--version')
+  if ($runtimeVersion -ne $ExpectedRuntimeVersion) {
     throw "Bundled Harness version '$runtimeVersion' does not match '$ExpectedRuntimeVersion'"
+  }
+  $runtimeModules = Join-Path $installRoot 'resources\dsh-runtime\node_modules'
+  $probeScript = Join-Path $PSScriptRoot 'electron-node-runtime-probe.cjs'
+  $probe = Invoke-ElectronNode $appPath @($probeScript, $runtimeModules) | ConvertFrom-Json
+  foreach ($name in @('node-pty', 'sharp', 'koffi')) {
+    if ($null -eq $probe.packages.$name) { throw "Electron Node could not load native package $name" }
   }
 
   $registeredApp = $null

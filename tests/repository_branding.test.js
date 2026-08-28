@@ -18,13 +18,28 @@ assert.match(readme, /docs\/images\/agent-presets\.png/);
 assert.match(readme, /docs\/images\/compact-sidebar\.png/);
 assert.match(readme, /deepseek-ai\/deepseek-harness/);
 assert.match(readme, /`master`/);
-assert.match(readme, /47f943859bef60e4160492346772ded9b24f765a/);
+assert.match(readme, /b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/);
 assert.match(readme, /Links2008/);
+assert.match(readme, /v4\.0\.0 是重大升级/);
+assert.match(readme, /安装包轻量化/);
+assert.match(readme, /DSH-IM/);
 assert.match(builder, /repo:\s*DeepSeek-Harness-Desktop/);
 assert.match(workflow, /repo:\\s\*DeepSeek-Harness-Desktop/);
 assert.match(verifier, /repo:\\s\*DeepSeek-Harness-Desktop/);
 assert.equal(lock.repository, "deepseek-ai/deepseek-harness");
 assert.equal(lock.branch, "master");
+assert.equal(lock.commit, "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e");
+
+const releaseNotes = fs.readdirSync(root)
+  .filter((name) => /^release-notes-.*\.md$/.test(name))
+  .sort();
+assert.deepEqual(releaseNotes, ["release-notes-v4.0.0.md"],
+  "only the maintained v4 release notes should remain in the repository");
+
+for (const match of readme.matchAll(/\]\((?!https?:\/\/)([^)#]+)(?:#[^)]+)?\)/g)) {
+  assert.equal(fs.existsSync(path.join(root, match[1])), true,
+    `README local link must exist: ${match[1]}`);
+}
 
 for (const image of [
   "docs/images/desktop-home.png",
