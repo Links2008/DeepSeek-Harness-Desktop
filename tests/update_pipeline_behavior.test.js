@@ -59,11 +59,17 @@ assert.doesNotMatch(workflow, /OPENAI_API_KEY|api\.openai\.com|@Codex/i, "automa
 
 const upstreamProcessFixture = `
 const captured = spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8' })
-const inherited = spawnSync(command, [...args], { cwd: options.cwd, env: options.env, stdio: 'inherit' })
+const echoed = spawnSync(command, [...args], {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: 'utf8',
+    stdio: ['inherit', 'pipe', 'pipe'],
+  })
+const inherited = spawn(command, [...args], { cwd: options.cwd, env: options.env, stdio: 'inherit' })
 `;
 const patchedUpstream = patchReleaseProcess(upstreamProcessFixture);
 assert.equal(patchedUpstream.changed, true);
-assert.equal((patchedUpstream.source.match(/shell: process\.platform === 'win32'/g) || []).length, 2);
+assert.equal((patchedUpstream.source.match(/shell: process\.platform === 'win32'/g) || []).length, 3);
 assert.equal(patchReleaseProcess(patchedUpstream.source).changed, false, "the patch must be idempotent");
 assert.throws(
   () => patchReleaseProcess("spawnSync(command, args, {})"),
