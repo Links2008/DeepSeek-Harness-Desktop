@@ -158,7 +158,7 @@ assert.equal(typeof patcher.patchStartupDiagnostics, "function",
   "runtime startup diagnostics must be independently regression-testable");
 const diagnosedProfileBoot = patcher.patchStartupDiagnostics(`
 async function runProfile(options) {
-\tconst composed = composeProfile(options.profile, options.patchFiles);
+\tconst composed = await composeProfile(options.profile, options.patchFiles);
 \tconst ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), (hostCtx) => {
 \t\tapp.current = hostCtx;
 \t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
@@ -235,7 +235,8 @@ assert.equal(typeof patcher.patchCompileCacheFlush, "function",
 const profileBoot = [
   "\tconst ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), prepare);",
   "\tapp.current = ctx;",
-  "\tif (!signalShutdown.signal.aborted) watch();",
+  "\tif (composed.profile.patchReload === \"live\" && !signalShutdown.signal.aborted) watch();",
+  "\tif (!signalShutdown.signal.aborted && ctx.fiber.state === 2) appReady.commit();",
 ].join("\n");
 const patched = patcher.patchCompileCacheFlush(profileBoot);
 assert.match(patched, /flushCompileCache/,

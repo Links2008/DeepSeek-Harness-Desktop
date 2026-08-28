@@ -88,11 +88,14 @@ function patchStartupDiagnostics(source) {
   const clock = "\tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;\n";
   source = source.replace(clock + "\tconst ctx = await boot(", "\tconst ctx = await boot(");
   if (!source.includes("[dsh-startup] profile begin")) {
-    const before = "async function runProfile(options) {\n\tconst composed = composeProfile(options.profile, options.patchFiles);";
+    const syncCompose = "\tconst composed = composeProfile(options.profile, options.patchFiles);";
+    const asyncCompose = "\tconst composed = await composeProfile(options.profile, options.patchFiles);";
+    const composeLine = source.includes(asyncCompose) ? asyncCompose : syncCompose;
+    const before = `async function runProfile(options) {\n${composeLine}`;
     const after = `async function runProfile(options) {
 \tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;
 \tif (startupDiagnosticsStartedAt) process.stderr.write("[dsh-startup] profile begin after 0ms\\n");
-\tconst composed = composeProfile(options.profile, options.patchFiles);
+${composeLine}
 \tif (startupDiagnosticsStartedAt) process.stderr.write(\`[dsh-startup] profile composed after \${Date.now() - startupDiagnosticsStartedAt}ms\\n\`);`;
     source = replaceOnce(source, before, after, "startup diagnostics phases");
     source = replaceOnce(source, "\tapp.current = ctx;",
@@ -117,7 +120,7 @@ function patchStartupDiagnostics(source) {
 
 function patchCompileCacheFlush(source) {
   if (source.includes("[dsh-startup] compile cache flushed")) return source;
-  const before = "\tapp.current = ctx;\n\tif (!signalShutdown.signal.aborted";
+  const before = "\tapp.current = ctx;";
   const after = `\tapp.current = ctx;
 \tif (process.env.NODE_COMPILE_CACHE) {
 \t\ttry {
@@ -125,8 +128,7 @@ function patchCompileCacheFlush(source) {
 \t\t\tflushCompileCache();
 \t\t\tprocess.stderr.write("[dsh-startup] compile cache flushed\\n");
 \t\t} catch {}
-\t}
-\tif (!signalShutdown.signal.aborted`;
+\t}`;
   return replaceOnce(source, before, after, "compile cache flush");
 }
 
