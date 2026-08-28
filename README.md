@@ -2,7 +2,7 @@
   <img src="deepseek_whale_hermes_rounded.png" width="128" alt="DeepSeek Harness Desktop">
 </p>
 
-<h1 align="center">DeepSeek Harness Desktop v4</h1>
+<h1 align="center">DeepSeek Harness Desktop</h1>
 
 <p align="center">
   轻量、快速、完整离线的 DeepSeek Harness Windows 桌面发行版。
