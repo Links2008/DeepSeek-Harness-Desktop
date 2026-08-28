@@ -802,7 +802,7 @@ async function injectDesktopTweaks() {
   `);
   await mainWindow.webContents.executeJavaScript(`
     (function () {
-      // v2.2.1-r5：顶级商店入口（SSH 正下方）回归。改用低频轮询（2.5s）而非
+      // v4：顶级商店入口固定在“新会话”正下方。改用低频轮询（2.5s）而非
       // MutationObserver：better-sidebar 高频重写侧栏 DOM，观察器会与之形成
       // 正反馈（r3 崩溃根因）；轮询只在条目脱链时补插一次，不监听 DOM 变化。
       if (window.__dshStorePollTimer) clearInterval(window.__dshStorePollTimer);
@@ -822,28 +822,24 @@ async function injectDesktopTweaks() {
           return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
         })[0];
       }
-      function findSshButton() {
-        var scopes = [sidebarColumn(), document];
-        for (var i = 0; i < scopes.length; i++) {
-          if (!scopes[i]) continue;
-          var btn = Array.prototype.slice.call(scopes[i].querySelectorAll('button')).find(function (b) {
-            var label = (b.getAttribute('aria-label') || '').trim();
-            var text = (b.textContent || '').trim();
-            return label === 'SSH' || text === 'SSH';
-          });
-          if (btn) return btn;
-        }
-        return null;
+      function findNewSessionButton() {
+        var column = sidebarColumn();
+        if (!column) return null;
+        var buttons = Array.prototype.slice.call(column.querySelectorAll('button'));
+        var textMatch = buttons.find(function (button) {
+          var text = (button.textContent || '').trim();
+          return text === '新会话' || text.toLowerCase() === 'new session';
+        });
+        if (textMatch) return textMatch;
+        return buttons.find(function (button) {
+          var label = (button.getAttribute('aria-label') || '').trim();
+          return label === '新建会话' || label === '新会话' || label.toLowerCase() === 'new session';
+        }) || null;
       }
       function storeInsertionPoint() {
-        var sshButton = findSshButton();
-        if (sshButton && sshButton.parentElement) {
-          return { parent: sshButton.parentElement, before: sshButton.nextSibling };
-        }
-        // Better Sidebar 当前版本不再渲染 SSH；以语义稳定的设置区作为首页回退锚点。
-        var settingsButton = findSettingsButton();
-        if (settingsButton && settingsButton.parentElement && settingsButton.parentElement.parentElement) {
-          return { parent: settingsButton.parentElement.parentElement, before: settingsButton.parentElement };
+        var newSessionButton = findNewSessionButton();
+        if (newSessionButton && newSessionButton.parentElement) {
+          return { parent: newSessionButton.parentElement, before: newSessionButton.nextSibling };
         }
         return null;
       }

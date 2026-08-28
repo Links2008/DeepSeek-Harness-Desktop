@@ -53,11 +53,17 @@ assert.match(main, /data-dsh-market-root/,
 assert.match(main, /marketTabs\[attempts\s*%\s*marketTabs\.length\]\.click\(\)/,
   "duplicate market labels must be tried in turn until the DSH Market root appears");
 assert.match(main, /function storeInsertionPoint\(\)/,
-  "the store entry must resolve an insertion point when Better Sidebar has no SSH button");
-assert.match(main, /settingsButton\.parentElement\.parentElement/,
-  "the semantic settings area must be the stable fallback anchor");
+  "the store entry must resolve its sidebar insertion point");
+assert.match(main, /function findNewSessionButton\(\)/,
+  "the store entry must locate the localized New Session action");
+assert.match(main, /var newSessionButton = findNewSessionButton\(\)/,
+  "New Session must be the store entry anchor");
+assert.match(main, /before: newSessionButton\.nextSibling/,
+  "the store entry must sit immediately below New Session");
+assert.doesNotMatch(main, /function findSshButton\(\)/,
+  "the store entry must no longer use SSH as its placement anchor");
 assert.match(main, /target\.parent\.insertBefore\(entry, target\.before\)/,
-  "the store entry must be inserted through either the SSH or settings fallback anchor");
+  "the store entry must be inserted at the New Session anchor");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?width:\s*36px\s*!important/, "rail buttons share one width");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?height:\s*36px\s*!important/, "rail buttons share one height");
 assert.match(main, /\[data-dsh-entry-row\][^{]*\{[\s\S]*?border-radius:\s*50%\s*!important/, "rail buttons are circular ghost buttons");
