@@ -11,13 +11,9 @@ const workflow = yaml.load(
 const steps = Object.values(workflow.jobs || {}).flatMap((job) => job.steps || []);
 const scripts = steps.filter((step) => step.shell === "pwsh" && typeof step.run === "string");
 
-assert.ok(scripts.length >= 6, "expected every release phase to expose a PowerShell script");
-
-const publishScript = scripts.find((step) => /publish the verified update/i.test(step.name));
-assert.ok(publishScript, "expected a verified release publication script");
-assert.doesNotMatch(publishScript.run, /``n-/, "Markdown line breaks must not be escaped as literal `n text");
-assert.match(publishScript.run, /\$markdownTick\s*=\s*\[char\]96/);
-assert.match(publishScript.run, /-join\s+\[Environment\]::NewLine/);
+assert.ok(scripts.length >= 5, "expected every build and acceptance phase to expose a PowerShell script");
+assert.equal(scripts.some((step) => /publish|commit the tested release/i.test(step.name)), false,
+  "Actions must validate releases without publishing or committing as a bot");
 
 for (const step of scripts) {
   const source = step.run.replace(/\$\{\{[\s\S]*?\}\}/g, "GITHUB_VALUE");

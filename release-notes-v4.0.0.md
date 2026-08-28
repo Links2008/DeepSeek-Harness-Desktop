@@ -31,7 +31,7 @@
 - Electron Node 必须通过 Harness CLI 版本检查。
 - `node-pty`、`sharp`、`koffi` 必须在正式安装目录中成功加载。
 - 安装包必须通过 7-Zip、`latest.yml` SHA-512、隔离安装、HTTP 200、AppID、端口释放和静默卸载验收。
-- Release 页面会附最终安装包字节数、SHA-256 与 GitHub 构建证明。
+- GitHub Actions 仅做只读构建与安装验收，不以 bot 身份提交或发布；最终 Release 由 `Links2008` 人工核对安装包字节数与 SHA-256 后发布。
 - 本地正式制品 SHA-256：`51B2AEC4EFB587AF4BC0D3871D897153548A658D2FA4DB96F02D1AD5BDCEA305`。
 
 ## 升级方式

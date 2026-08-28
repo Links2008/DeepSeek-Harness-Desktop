@@ -94,13 +94,13 @@
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
 > [!NOTE]
-> 安装包暂未使用商业代码签名证书，SmartScreen 可能显示“未知发布者”。请在 Release 页面核对 SHA-256 和 GitHub 构建证明。
+> 安装包暂未使用商业代码签名证书，SmartScreen 可能显示“未知发布者”。请在 Release 页面核对安装包字节数和 SHA-256。
 
 ## 自动更新
 
 用户点击侧栏更新按钮后，桌面端从本仓库 Releases 检查并下载完整安装包。更新前会终止后端进程树，安装完成后补齐缺失的桌面和开始菜单快捷方式。
 
-发布流水线只有在测试、归档、SHA-512、隔离安装、AppID、Harness 版本、HTTP 200、原生模块、端口释放和卸载全部通过后，才会把 Draft Release 公开并设为 Latest。
+GitHub Actions 仅以只读权限执行测试、归档、SHA-512、隔离安装、AppID、Harness 版本、HTTP 200、原生模块、端口释放和卸载验收，不提交代码或发布 Release。通过后由 `Links2008` 身份人工核对制品并发布为 Latest。
 
 ## 上游与版本谱系
 
@@ -122,7 +122,7 @@ npm test
 npm run build:installer
 ```
 
-本地完整构建需要先在 `bundle/dsh-runtime` 组装官方 Harness runtime。Electron 依赖同时提供桌面壳和后端 Node 运行时，不再需要 `bundle/node/node.exe`。完整自动构建流程见 [upstream-sync.yml](.github/workflows/upstream-sync.yml)。
+本地完整构建需要先在 `bundle/dsh-runtime` 组装官方 Harness runtime。Electron 依赖同时提供桌面壳和后端 Node 运行时，不再需要 `bundle/node/node.exe`。只读自动验收流程见 [upstream-sync.yml](.github/workflows/upstream-sync.yml)。
 
 ## 安全与隐私
 

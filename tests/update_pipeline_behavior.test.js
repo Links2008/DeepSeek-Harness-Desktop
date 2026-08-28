@@ -16,24 +16,19 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), 
 
 assert.match(workflow, /workflow_dispatch:/, "the release pipeline needs a forceable acceptance run");
 assert.match(workflow, /inputs\.force|inputs\.force|inputs:\s*[\s\S]*force:/);
-assert.match(workflow, /push:\s*[\s\S]*branches:\s*\[main\][\s\S]*paths:/, "desktop-shell pushes must publish without a manual dispatch");
+assert.match(workflow, /push:\s*[\s\S]*branches:\s*\[main\][\s\S]*paths:/, "desktop-shell pushes must run acceptance without a manual dispatch");
 const pushBlock = workflow.match(/push:\s*[\s\S]*?schedule:/)?.[0] || "";
-assert.doesNotMatch(pushBlock, /package(?:-lock)?\.json|upstream-lock\.json/, "the bot version commit must not match the push trigger");
+assert.doesNotMatch(pushBlock, /package(?:-lock)?\.json|upstream-lock\.json/, "manual release-state commits must not retrigger packaging");
 assert.match(workflow, /release-policy\.cjs/, "release decisions must use the tested state machine");
 assert.match(workflow, /release\.outputs\.bump[\s\S]*npm version patch --no-git-tag-version/, "repair runs must reuse the existing version");
-assert.match(workflow, /git diff --cached --quiet[\s\S]*diffExitCode[\s\S]*-eq 1/, "release-state commits must branch on Git's exit code, not stdout");
 assert.match(workflow, /PSNativeCommandUseErrorActionPreference\s*=\s*\$true/, "native build failures must stop the workflow immediately");
 assert.match(workflow, /patch-upstream-windows-release\.cjs[\s\S]*release:pack/, "Windows CI must patch upstream child-process resolution before packing");
 assert.match(packageJson.scripts["build:installer"], /--publish\s+never/, "electron-builder must not publish before acceptance gates pass");
 assert.match(workflow, /resources[\\/]app-update\.yml/, "the installed updater feed must be verified");
 assert.match(workflow, /installer-dist[\\/]latest\.yml/, "release metadata must be checked before publish");
 assert.match(workflow, /SHA512[\s\S]*ComputeHash[\s\S]*latest\.yml/, "the installer hash must match release metadata");
-assert.match(workflow, /installer_sha256[\s\S]*SHA-256/, "each release must publish a human-verifiable installer checksum");
-assert.match(workflow, /version -eq '2\.1\.0'\) \{ 'v2\.1' \}/, "desktop 2.1.0 must publish under the requested v2.1 tag");
-assert.equal((workflow.match(/-eq '2\.1\.0'\) \{ 'v2\.1' \}/g) || []).length, 2, "release inspection and publication must agree on v2.1");
-assert.match(workflow, /release-notes-\$tag\.md/, "the release must load a structured version-specific description");
-assert.match(workflow, /deepseek-ai\/deepseek-harness\/releases\/tags\/\$upstreamTag/, "missing version notes must fall back to the official upstream release notes");
-assert.doesNotMatch(workflow, /Automated desktop release for DeepSeek Harness/, "a published tag must not fall back to a one-line placeholder");
+assert.match(workflow, /installer_sha256[\s\S]*SHA256/, "acceptance must calculate a human-verifiable installer checksum");
+assert.match(workflow, /version -eq '2\.1\.0'\) \{ 'v2\.1' \}/, "release inspection must preserve historical tag mapping");
 assert.match(workflow, /upstream-lock\.json[\s\S]*release\.outputs\.sha/, "the packaged runtime lock must match the selected upstream commit");
 assert.match(verifier, /VersionInfo[\s\S]*FileVersion/, "the installed executable version must match the release");
 assert.match(verifier, /Get-StartApps[\s\S]*com\.deepseek\.dsh/, "the installed shortcut AppID must own notifications");
@@ -50,11 +45,11 @@ assert.match(verifier, /ELECTRON_RUN_AS_NODE[\s\S]*electron-node-runtime-probe\.
 assert.match(verifier, /node-pty[\s\S]*sharp[\s\S]*koffi/,
   "installed acceptance must load every shipped native addon through Electron Node");
 assert.match(verifier, /Uninstall[\s\S]*\/S/, "the CI-installed app must pass a silent uninstall check");
-assert.match(workflow, /gh release create[\s\S]*--draft/, "new releases must remain hidden while assets are uploaded");
-assert.match(workflow, /function Wait-TargetRelease[\s\S]*Start-Sleep[\s\S]*\$release = Wait-TargetRelease/, "draft creation must tolerate GitHub API propagation delay");
-assert.match(workflow, /gh release upload/, "draft recovery must upload missing or invalid assets");
-assert.match(workflow, /assets[\s\S]*\.size/, "remote asset names and sizes must be checked before publishing");
-assert.match(workflow, /gh release edit[\s\S]*--draft=false/, "only a verified draft may become public");
+assert.match(workflow, /permissions:\s*[\s\S]*contents:\s*read/, "Actions must be read-only for repository contents");
+assert.doesNotMatch(workflow, /github-actions\[bot\]|git push|gh release (?:create|upload|edit)/i,
+  "release state and assets must be submitted manually by Links2008, never by a bot");
+assert.doesNotMatch(workflow, /attest-build-provenance|attestations:\s*write|id-token:\s*write/i,
+  "the read-only validation bot must not publish attestations");
 assert.doesNotMatch(workflow, /OPENAI_API_KEY|api\.openai\.com|@Codex/i, "automatic packaging must not call GPT or consume Codex quota");
 
 const upstreamProcessFixture = `

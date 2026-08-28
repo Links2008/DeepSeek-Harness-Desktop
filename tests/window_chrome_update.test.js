@@ -9,6 +9,7 @@ const controlsPath = path.join(root, "window-controls.html");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const builder = fs.readFileSync(path.join(root, "electron-builder.yml"), "utf8");
 const workflowPath = path.join(root, ".github", "workflows", "upstream-sync.yml");
+const verifier = fs.readFileSync(path.join(root, "scripts", "verify-installed-runtime.ps1"), "utf8");
 
 assert.match(main, /show:\s*true/, "v2 must show its native-color window immediately");
 assert.match(main, /transparent:\s*false/);
@@ -82,7 +83,9 @@ const workflow = fs.readFileSync(workflowPath, "utf8");
 assert.match(workflow, /schedule:/);
 assert.match(workflow, /deepseek-ai\/deepseek-harness/);
 assert.match(workflow, /npm test/);
-assert.match(workflow, /HTTP 200|StatusCode/);
-assert.match(workflow, /gh release create/);
+assert.match(workflow, /verify-installed-runtime\.ps1/);
+assert.match(verifier, /StatusCode\s+-eq\s+200/, "installed acceptance must require HTTP 200");
+assert.doesNotMatch(workflow, /github-actions\[bot\]|git push|gh release (?:create|upload|edit)/i,
+  "upstream tracking must validate without submitting as a bot");
 
 console.log("window chrome and update configuration verified");
