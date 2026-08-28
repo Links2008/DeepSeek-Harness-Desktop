@@ -49,18 +49,14 @@ function Start-DesktopApp {
   param([string]$AppPath)
   $stdout = [IO.Path]::GetTempFileName()
   $stderr = [IO.Path]::GetTempFileName()
-  $previous = $env:ELECTRON_RUN_AS_NODE
-  try {
-    # Start-Process inherits the current environment. The acceptance probes use
-    # Electron as Node, but the GUI process must never inherit that switch.
-    Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-    $process = Start-Process $AppPath -WindowStyle Hidden -PassThru `
-      -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-    return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
-  } finally {
-    if ($null -eq $previous) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
-    else { $env:ELECTRON_RUN_AS_NODE = $previous }
-  }
+  # The probes intentionally run this binary as Node. Strip both current and
+  # legacy flags from the GUI child itself instead of mutating the parent shell.
+  $process = Start-Process $AppPath -WindowStyle Hidden `
+    -Environment @{
+      ELECTRON_RUN_AS_NODE = $null
+      ATOM_SHELL_INTERNAL_RUN_AS_NODE = $null
+    } -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
 }
 
 $installerPath = (Resolve-Path $Installer).Path

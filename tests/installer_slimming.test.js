@@ -38,8 +38,8 @@ assert.doesNotMatch(workflow, /Copy-Item \(Get-Command node\.exe\)\.Source bundl
 assert.match(verifier, /Invoke-ElectronNode[\s\S]*ELECTRON_RUN_AS_NODE/,
   "installed acceptance must run the packaged executable in Node mode");
 assert.match(verifier,
-  /function Start-DesktopApp[\s\S]*Remove-Item Env:ELECTRON_RUN_AS_NODE[\s\S]*Start-Process \$AppPath[\s\S]*-PassThru/,
-  "desktop acceptance must launch outside Electron Node mode and retain the process handle");
+  /function Start-DesktopApp[\s\S]*Start-Process \$AppPath[\s\S]*-Environment\s*@\{[\s\S]*ELECTRON_RUN_AS_NODE\s*=\s*\$null[\s\S]*ATOM_SHELL_INTERNAL_RUN_AS_NODE\s*=\s*\$null[\s\S]*-PassThru/,
+  "desktop acceptance must explicitly strip both Electron Node flags from the child environment");
 assert.match(verifier, /\.Process\.HasExited[\s\S]*desktop process exited/,
   "desktop acceptance must fail fast with process diagnostics when Electron exits before HTTP readiness");
 
