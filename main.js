@@ -561,9 +561,7 @@ async function injectWindowChrome() {
     .dsh-native-drag-region [role="button"],
     .dsh-native-drag-region [role="tab"],
     .dsh-native-drag-region [tabindex] { -webkit-app-region: no-drag; }
-    /* v3.1：侧栏底部"检查更新"与"移动端远程控制"两枚按钮统一规格
-       （36px 圆形幽灵按钮、同一颜色 token、flex 行对齐；此前更新钮被
-       强制 40px 白色而远程钮保持插件原生 36px 灰色，大小颜色均不一致） */
+    /* v4：侧栏底部壳层入口统一为 36px 圆形幽灵按钮。 */
     [data-dsh-entry-row] { display: flex !important; align-items: center !important; gap: 2px !important; }
     [data-dsh-entry-row] > button {
       width: 36px !important; height: 36px !important; min-width: 36px !important; max-width: 36px !important;
@@ -653,9 +651,46 @@ async function injectWindowChrome() {
         return '检查更新';
       }
 
+      function ensureUpdateButton() {
+        var button = document.querySelector('button[data-dsh-update-state], button[aria-label="检查更新"]');
+        if (button) return button;
+        var sidebar = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]') || document;
+        var settingsButtons = Array.prototype.slice.call(sidebar.querySelectorAll('button')).filter(function (candidate) {
+          var label = (candidate.getAttribute('aria-label') || '').trim();
+          var text = (candidate.textContent || '').trim();
+          return label === '设置' || label.toLowerCase() === 'settings' ||
+            text === '设置' || text.toLowerCase() === 'settings';
+        });
+        var settingsButton = settingsButtons.sort(function (a, b) {
+          return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
+        })[0];
+        var settingsArea = settingsButton && settingsButton.parentElement;
+        var footerActions = settingsArea && settingsArea.previousElementSibling;
+        if (!footerActions && settingsArea && settingsArea.parentElement) {
+          settingsArea = settingsArea.parentElement;
+          footerActions = settingsArea.previousElementSibling;
+        }
+        if (!footerActions) return null;
+        var row = footerActions.querySelector('[data-dsh-update-row]');
+        if (!row) {
+          row = document.createElement('div');
+          row.dataset.dshEntryRow = '';
+          row.dataset.dshUpdateRow = '';
+          footerActions.appendChild(row);
+        }
+        button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.dshUpdateEntry = '';
+        button.setAttribute('aria-label', '检查更新');
+        button.title = '检查更新';
+        button.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+        row.appendChild(button);
+        return button;
+      }
+
       function bindUpdateButton() {
         if (!window.dshWin || !window.dshWin.checkUpdate) return;
-        var button = document.querySelector('button[data-dsh-update-state], button[aria-label="检查更新"]');
+        var button = ensureUpdateButton();
         if (!button) return;
         var row = button.parentElement;
         if (row && row.dataset.dshEntryRow === undefined) row.dataset.dshEntryRow = '';

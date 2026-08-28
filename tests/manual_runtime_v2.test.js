@@ -21,8 +21,18 @@ assert.match(main, /initializeUpdater/);
 assert.match(main, /autoUpdater\.checkForUpdates\(\)/);
 assert.match(main, /update-downloaded/);
 assert.match(main, /autoUpdater\.quitAndInstall\(true,\s*true\)/);
-assert.match(main, /button\[aria-label=["']检查更新["']\]/, "reuse the Harness sidebar update button");
+assert.match(main, /button\[aria-label=["']检查更新["']\]/, "prefer an existing Harness update button when available");
 assert.match(main, /data-dsh-update-state/, "the existing button must expose checking, downloading and ready states");
+assert.match(main, /function ensureUpdateButton\(\)/,
+  "the desktop shell must restore Check for Updates when upstream provides no button");
+assert.match(main, /dataset\.dshUpdateEntry/,
+  "the shell-owned update button must have a stable runtime marker");
+assert.match(main, /settingsArea\.previousElementSibling/,
+  "the shell-owned update button must use the footer action area above Settings");
+assert.match(main, /!footerActions && settingsArea && settingsArea\.parentElement/,
+  "the Settings tooltip wrapper must be climbed when resolving the footer action area");
+assert.match(main, /footerActions\.appendChild\(row\)/,
+  "the update row must be attached to the sidebar footer action area");
 assert.match(preload, /checkUpdate/);
 assert.match(preload, /installUpdate/);
 assert.match(preload, /onUpdateState/);
