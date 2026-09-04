@@ -105,16 +105,6 @@ try {
   $releaseIndex = @(gh api "repos/$Repository/releases?per_page=100" | ConvertFrom-Json)
   if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing GitHub Releases' }
   $existingRelease = @($releaseIndex | Where-Object tag_name -eq $tag).Count -gt 0
-  $localTag = @(git tag --list $tag)
-  if ($localTag.Count -gt 0 -and (git rev-list -n 1 $tag).Trim() -ne $head) {
-    throw "Local tag $tag does not point to HEAD"
-  }
-  $remotePeeled = @(git ls-remote --tags origin "refs/tags/${tag}^{}")
-  $remoteDirect = @(git ls-remote --tags origin "refs/tags/$tag")
-  $remoteCommit = if ($remotePeeled.Count) { ($remotePeeled[0] -split '\s+')[0] }
-    elseif ($remoteDirect.Count) { ($remoteDirect[0] -split '\s+')[0] } else { $null }
-  if ($remoteCommit -and $remoteCommit -ne $head) { throw "Remote tag $tag does not point to HEAD" }
-
   $sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
   $expectedAssets = @{
     $installerName = (Get-Item -LiteralPath $installer).Length
@@ -126,6 +116,16 @@ try {
     Write-Host "Release $tag already exists and is complete; no files were overwritten"
     return
   }
+  $localTag = @(git tag --list $tag)
+  if ($localTag.Count -gt 0 -and (git rev-list -n 1 $tag).Trim() -ne $head) {
+    throw "Local tag $tag does not point to HEAD"
+  }
+  $remotePeeled = @(git ls-remote --tags origin "refs/tags/${tag}^{}")
+  $remoteDirect = @(git ls-remote --tags origin "refs/tags/$tag")
+  $remoteCommit = if ($remotePeeled.Count) { ($remotePeeled[0] -split '\s+')[0] }
+    elseif ($remoteDirect.Count) { ($remoteDirect[0] -split '\s+')[0] } else { $null }
+  if ($remoteCommit -and $remoteCommit -ne $head) { throw "Remote tag $tag does not point to HEAD" }
+
   Write-Host "Release preflight passed: $tag, author=$login, CI=$($successfulRun[0].html_url), bytes=$expectedSize, SHA-256=$sha256"
   if (!$Publish) { Write-Host 'Dry run only. Add -Publish to create the tag and GitHub Release.'; return }
 
