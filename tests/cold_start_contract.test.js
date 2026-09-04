@@ -5,6 +5,9 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "main.js"), "utf8");
+const backendSpec = fs.readFileSync(path.join(root, "runtime", "backend-spec.cjs"), "utf8");
+const daemonController = fs.readFileSync(path.join(root, "runtime", "daemon-controller.cjs"), "utf8");
+const daemonHost = fs.readFileSync(path.join(root, "runtime", "daemon-host.cjs"), "utf8");
 const loading = fs.readFileSync(path.join(root, "loading.html"), "utf8");
 const preload = fs.readFileSync(path.join(root, "preload.js"), "utf8");
 const builder = fs.readFileSync(path.join(root, "electron-builder.yml"), "utf8");
@@ -20,26 +23,28 @@ const prewarmSource = fs.readFileSync(
 const profilePrebundleSource = fs.readFileSync(
   path.join(root, "scripts", "prepare-profile-prebundles.cjs"), "utf8");
 
-assert.match(main, /NODE_COMPILE_CACHE/, "backend must enable Node's persistent module compile cache");
-assert.match(main, /NODE_COMPILE_CACHE_PORTABLE/, "cache must remain usable across packaged runtime path changes");
-assert.match(main, /DSH_TELEMETRY_DISABLED:\s*"1"/,
+assert.match(backendSpec, /NODE_COMPILE_CACHE/, "backend must enable Node's persistent module compile cache");
+assert.match(backendSpec, /NODE_COMPILE_CACHE_PORTABLE/, "cache must remain usable across packaged runtime path changes");
+assert.match(backendSpec, /DSH_TELEMETRY_DISABLED:\s*"1"/,
   "the desktop must not import the disabled telemetry stack during startup");
-assert.match(main, /DSH_STARTUP_DIAGNOSTICS:\s*"1"/,
+assert.match(backendSpec, /DSH_STARTUP_DIAGNOSTICS:\s*"1"/,
   "the packaged backend must emit privacy-safe startup phase diagnostics");
-assert.match(main, /backend port-open after /,
+assert.match(daemonController, /backend port-open after /,
   "socket readiness must be timed independently from plugin-tree settlement");
-assert.match(main, /args:\s*\["--expose-internals",\s*bundledCli,\s*"web",\s*"--no-open",\s*"--host",\s*"127\.0\.0\.1",\s*"--port",\s*"3080"\]/,
+assert.match(backendSpec, /"--use-system-ca",[\s\S]*"--expose-internals",[\s\S]*cli,[\s\S]*"web",[\s\S]*"--no-open",[\s\S]*"--host",[\s\S]*"127\.0\.0\.1",[\s\S]*"--port"/,
   "the packaged desktop backend must not open a competing external browser window");
-assert.match(main, /env:\s*\{\s*\.\.\.process\.env,\s*\.\.\.backend\.env\s*\}/s,
+assert.match(daemonHost, /env:\s*\{\s*\.\.\.process\.env,\s*\.\.\.spec\.env\s*\}/s,
   "backend spawn must inherit the cache environment without dropping the user environment");
 assert.match(main, /app\.getPath\("userData"\)/,
   "the compile cache must live under durable user data rather than the disposable temp directory");
-assert.match(main, /dsh web:\\s\*http/,
+assert.match(daemonHost, /dsh web:\\s\*http/,
   "renderer reveal must observe the backend's explicit service-ready announcement");
-assert.match(main, /compile cache flushed/,
+assert.match(daemonHost, /compile cache flushed/,
   "renderer reveal must observe the post-plugin-tree startup settlement signal");
-assert.match(main, /backendAnnouncedReady\s*&&\s*backendStartupSettled\s*&&\s*await portOpen\(3080\)/,
-  "a listening socket or HTTP announcement alone must not reveal a half-initialized plugin UI");
+assert.match(daemonHost, /status:\s*serviceAnnounced\s*\?\s*"ready"\s*:\s*"settling"/,
+  "the daemon must distinguish service announcement from plugin-tree settlement");
+assert.match(daemonController, /state\?\.status\s*===\s*"ready"\s*&&\s*await isDshBackend/,
+  "the shell handoff must require daemon settlement and HTTP readiness together");
 assert.match(main, /async function transitionToBackend\(\)/,
   "the startup surface must own a bounded handoff instead of hard-cutting to the backend");
 assert.match(main, /startupView\s*=\s*new WebContentsView/,
@@ -52,7 +57,7 @@ assert.match(main, /function createWindow\(\)[\s\S]*backgroundThrottling:\s*fals
   "the backend renderer must keep painting while it is covered by the startup view");
 assert.match(main, /function startBackendNavigation\(\)[\s\S]*mainWindow\.loadURL\(URL\)/,
   "backend navigation must have one idempotent preload path behind the startup overlay");
-assert.match(main, /backend port-open after [\s\S]*startBackendNavigation\(\)/,
+assert.match(daemonController, /backend port-open after [\s\S]*this\.onPortOpen\(\)/,
   "the renderer must begin loading as soon as the owned backend socket opens");
 assert.match(main, /async function transitionToBackend\(\)[\s\S]*await startBackendNavigation\(\)[\s\S]*revealBackendEntry[\s\S]*waitForBackendPaint[\s\S]*dshBeginStartupExit/,
   "the settled backend must reuse the preloaded document and only then release the overlay");

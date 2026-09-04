@@ -4,25 +4,22 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "main.js"), "utf8");
+const backendSpec = fs.readFileSync(path.join(root, "runtime", "backend-spec.cjs"), "utf8");
 const builder = fs.readFileSync(path.join(root, "electron-builder.yml"), "utf8");
 
-assert.match(main, /process\.resourcesPath/);
-assert.match(main, /dsh-runtime/);
-assert.match(main, /process\.execPath/);
-assert.match(main, /ELECTRON_RUN_AS_NODE/);
-assert.match(main, /"@deepseek-ai", "dsh", "lib", "bin\.js"/);
+assert.match(main, /createBackendSpec/);
+assert.match(backendSpec, /resourcesPath/);
+assert.match(backendSpec, /dsh-runtime/);
+assert.match(backendSpec, /execPath/);
+assert.match(backendSpec, /ELECTRON_RUN_AS_NODE/);
+assert.match(backendSpec, /"@deepseek-ai", "dsh", "lib", "bin\.js"/);
 assert.match(builder, /target:\s*nsis/);
 assert.match(builder, /oneClick:\s*false/);
 assert.match(builder, /allowToChangeInstallationDirectory:\s*true/);
-const forcesZipExtraction = /useZip:\s*true/.test(builder);
-const disablesDifferentialPackage = /differentialPackage:\s*false/.test(builder);
-assert.equal(
-  forcesZipExtraction && !disablesDifferentialPackage,
-  false,
-  "useZip:true with differential packaging embeds a 7z payload but selects the ZIP extractor",
-);
-assert.match(builder, /useZip:\s*true/);
-assert.match(builder, /differentialPackage:\s*false/);
+assert.match(builder, /useZip:\s*false/,
+  "the installer must use electron-builder's standard 7z payload instead of nsisunz");
+assert.match(builder, /differentialPackage:\s*true/,
+  "v4 updates must retain blockmap-based differential downloads");
 assert.match(builder, /!\*\*\/\*\.map/);
 assert.match(builder, /!\*\*\/\*\.d\.ts/);
 assert.match(builder, /electronLanguages:[\s\S]*en-US[\s\S]*zh-CN[\s\S]*zh-TW/);

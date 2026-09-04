@@ -1,5 +1,6 @@
 appId: com.deepseek.dsh
 productName: DeepSeekHarness
+electronDist: node_modules/electron/dist
 directories:
   output: installer-dist
 files:
@@ -14,6 +15,10 @@ files:
   - scripts/prepare-compile-cache.cjs
   - scripts/prepare-profile-prebundles.cjs
   - scripts/prebundle-runtime-startup.cjs
+  - runtime/backend-spec.cjs
+  - runtime/daemon-controller.cjs
+  - runtime/daemon-host.cjs
+  - runtime/plugin-recovery.cjs
 extraResources:
   - from: bundle/dsh-runtime/package.json
     to: dsh-runtime/package.json
@@ -65,8 +70,8 @@ publish:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  useZip: true
-  differentialPackage: false
+  useZip: false
+  differentialPackage: true
   perMachine: false
   createDesktopShortcut: always
   createStartMenuShortcut: true

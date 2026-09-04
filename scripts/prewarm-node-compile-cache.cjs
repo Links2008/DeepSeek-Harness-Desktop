@@ -46,7 +46,7 @@ async function main() {
   const port = await freePort();
   let output = "";
   try {
-    const child = spawn(electron, ["--expose-internals", cli, "web", "--no-open", "--host", "127.0.0.1", "--port", String(port)], {
+    const child = spawn(electron, ["--use-system-ca", "--expose-internals", cli, "web", "--no-open", "--host", "127.0.0.1", "--port", String(port)], {
       cwd: runtimeRoot,
       windowsHide: true,
       env: {

@@ -1,10 +1,10 @@
 // DeepSeek Harness Electron 桌面壳
 const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut, nativeTheme } = require("electron");
 const { spawn } = require("child_process");
-const net = require("net");
-const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { createBackendSpec } = require("./runtime/backend-spec.cjs");
+const { DaemonController } = require("./runtime/daemon-controller.cjs");
 const { patchHarnessRuntime } = require("./scripts/patch-harness-runtime.cjs");
 const { prepareCompileCache } = require("./scripts/prepare-compile-cache.cjs");
 const { prepareProfilePrebundles } = require("./scripts/prepare-profile-prebundles.cjs");
@@ -22,7 +22,7 @@ const CONTROL_COLLAPSED_X = 4;
 const CONTROL_EXPANDED_X = 23;
 const CONTROL_Y = 3;
 const CONTROL_MOTION_MS = 160;
-let dshProc = null;
+let daemonController = null;
 // 更新/退出状态。更新时杀后端会触发 exit→respawn 恶性循环
 // （后端重启→运行时重新锁住安装目录→NSIS 无法替换文件→"无法关闭"死循环），
 // isQuitting 用于阻断 respawn；pendingInstallerPath 供看门狗兜底拉起安装器。
@@ -30,21 +30,10 @@ let isQuitting = false;
 let pendingInstallerPath = null;
 let installInFlight = false;
 
-// v3.1.2-deep：杀掉后端整个进程树。dshProc.kill() 只杀直接子进程，而后端会
-// 再 spawn esbuild/ripgrep/conpty 等（见 dsh-runtime/node_modules），任何一个
-// 存活都会锁住安装目录文件并占用端口 3080，导致更新安装失败或退出挂起。
-function killBackendTree() {
-  if (!dshProc) return;
-  const pid = dshProc.pid;
-  try { dshProc.removeAllListeners("exit"); } catch (e) {}
-  try { dshProc.kill(); } catch (e) {}
-  if (pid && process.platform === "win32") {
-    try {
-      require("child_process").spawnSync(
-        "taskkill", ["/F", "/T", "/PID", String(pid)],
-        { windowsHide: true, stdio: "ignore", timeout: 15000 }
-      );
-    } catch (e) {}
+// 普通关窗保留 daemon；只有安装更新才停止整棵后端进程树并释放安装目录。
+function stopBackendForUpdate() {
+  if (daemonController && daemonController.stopSync("installer-update")) return;
+  if (process.platform === "win32") {
     // v3 升级兼容：清理旧版本从安装目录启动的独立 node，不误杀其它 Node。
     try {
       const instDir = path.dirname(process.execPath).replace(/'/g, "''");
@@ -58,7 +47,6 @@ function killBackendTree() {
       );
     } catch (e) {}
   }
-  dshProc = null;
 }
 let mainWindow = null;
 let controlsView = null;
@@ -73,7 +61,10 @@ let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
 const liveNotifications = new Set();
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const isDaemonPrewarm = process.argv.includes("--daemon-prewarm");
+const disableLoginPrewarm = process.argv.includes("--no-login-prewarm");
+const benchmarkHideAfterReady = process.argv.includes("--benchmark-hide-after-ready");
+const hasSingleInstanceLock = isDaemonPrewarm || app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
 
@@ -94,6 +85,22 @@ function log(msg) {
     const logFile = path.join(app.getPath("userData"), "dsh_desktop.log");
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch (e) {}
+}
+
+function configureLoginPrewarm() {
+  if (!app.isPackaged || process.platform !== "win32" || disableLoginPrewarm) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: process.execPath,
+      args: ["--daemon-prewarm"],
+      enabled: true,
+      name: "DeepSeekHarness",
+    });
+    log("login daemon prewarm enabled");
+  } catch (error) {
+    log("login daemon prewarm registration failed: " + error.message);
+  }
 }
 
 // v2.2：设置持久化层（dsh-atomic-write）用 <file>.lock 串行化跨进程写入，且从不
@@ -120,58 +127,6 @@ function healOrphanedSettingsLock() {
   }
 }
 
-// v3.1.3（issue #5）：故障插件自动隔离。Git 依赖插件可能未执行 build 就安装
-// （如 graph-memory@1.6.0-beta.1：package.json 声明 ./dist/dsh.js 但仓库只有
-// dsh.ts/src，无 dist/），DSH 加载时报 ERR_MODULE_NOT_FOUND → 整个 plugin
-// tree boot 失败 → backend 退出 → Desktop 无法连线。上游 dsh 短期难以逐个
-// 兜底，desktop shell 层兜底：backend 启动即崩时解析 stderr 定位坏插件，
-// 从 web profile 的 package.json（dependencies + dsh.profile.bundles）移除
-// （先备份），随后按既有 respawn 逻辑重启，单插件故障不再拖垮整个应用。
-let quarantineCount = 0;
-function quarantineBrokenPlugin(diagText) {
-  try {
-    if (quarantineCount >= 2) return null; // 防循环：一次会话最多隔离 2 个
-    if (!diagText || !/plugin tree failed to load|ERR_MODULE_NOT_FOUND/.test(diagText)) return null;
-    let pkgName = null;
-    // 首选：failed to import loader entry graph-memory (graph-memory/dsh)
-    let m = diagText.match(/failed to import loader entry .+?\((.+?)\/dsh\)/);
-    if (m) pkgName = m[1].trim();
-    // 兜底：ERR_MODULE_NOT_FOUND 行内 node_modules 路径（兼容 scoped 包）
-    if (!pkgName) {
-      m = diagText.match(/ERR_MODULE_NOT_FOUND[\s\S]{0,400}?node_modules[\\/]((?:@[^\\\s/]+[\\/])?[^\\\s/'"]+)/);
-      if (m) pkgName = m[1].trim();
-    }
-    if (!pkgName || !/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(pkgName)) return null;
-    const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
-    const manifestPath = path.join(profileDir, "package.json");
-    if (!fs.existsSync(manifestPath)) return null;
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    const inDeps = manifest.dependencies && Object.prototype.hasOwnProperty.call(manifest.dependencies, pkgName);
-    const bundles = manifest.dsh && manifest.dsh.profile && manifest.dsh.profile.bundles;
-    const inBundles = Array.isArray(bundles) && bundles.includes(pkgName);
-    if (!inDeps && !inBundles) return null;
-    const backup = manifestPath + ".bak-quarantine-" + new Date().toISOString().replace(/[:.]/g, "-");
-    fs.copyFileSync(manifestPath, backup);
-    if (inDeps) delete manifest.dependencies[pkgName];
-    if (inBundles) manifest.dsh.profile.bundles = bundles.filter((b) => b !== pkgName);
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
-    quarantineCount++;
-    log("quarantined broken plugin: " + pkgName + " (backup: " + path.basename(backup) + ")");
-    try {
-      if (Notification.isSupported()) {
-        new Notification({
-          title: "已自动隔离故障插件 " + pkgName,
-          body: "该插件缺少构建产物（无 dist/）导致后端无法启动，已自动移除并重启。原配置备份于 " + path.basename(backup) + "，插件修复后可重新安装。",
-          icon: path.join(__dirname, "deepseek_whale_hermes_rounded.png"),
-        }).show();
-      }
-    } catch (e) {}
-    return pkgName;
-  } catch (e) {
-    log("quarantine failed: " + e.message);
-    return null;
-  }
-}
 
 function emitUpdateState(next) {
   updateState = { ...updateState, ...next, current: app.getVersion() };
@@ -245,236 +200,64 @@ function initializeUpdater() {
   });
 }
 
-function resolveBackend() {
-  const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
-  const bundledCli = path.join(runtimeRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
-  const compileCache = prepareCompileCache(app.getPath("userData"), process.resourcesPath);
-  if (!compileCache.packaged) log("packaged compile cache unavailable, using user-data fallback: " + compileCache.error.message);
-  if (app.isPackaged && fs.existsSync(bundledCli)) {
-    return {
-      command: process.execPath,
-      args: ["--expose-internals", bundledCli, "web", "--no-open", "--host", "127.0.0.1", "--port", "3080"],
-      cwd: runtimeRoot,
-      env: {
-        ELECTRON_RUN_AS_NODE: "1",
-        NODE_COMPILE_CACHE: compileCache.dir,
-        NODE_COMPILE_CACHE_PORTABLE: "1",
-        DSH_TELEMETRY_DISABLED: "1",
-        DSH_STARTUP_DIAGNOSTICS: "1",
-      },
-    };
-  }
-  if (!app.isPackaged && fs.existsSync(DEV_DSH_DIR)) {
-    return {
-      command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/c", "pnpm", "dsh", "web"],
-      cwd: DEV_DSH_DIR,
-    };
-  }
-  return null;
-}
 
-function portOpen(port, timeout = 400) {
-  return new Promise((resolve) => {
-    const s = net.createConnection({ port, host: "127.0.0.1" }, () => { s.destroy(); resolve(true); });
-    s.on("error", () => resolve(false));
-    s.setTimeout(timeout, () => { s.destroy(); resolve(false); });
+function persistentBackendSpec() {
+  const backend = createBackendSpec({
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    userData: app.getPath("userData"),
+    devDshDir: DEV_DSH_DIR,
+    prepareCompileCache,
   });
+  if (backend?.compileCache && !backend.compileCache.packaged) {
+    log("packaged compile cache unavailable, using user-data fallback: " + backend.compileCache.error.message);
+  }
+  return backend;
 }
 
-function isDshBackend(port = 3080, timeout = 2000) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    const request = http.get({ host: "127.0.0.1", port, path: "/" }, (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => {
-        if (body.length < 65536) body += chunk;
-      });
-      response.on("end", () => {
-        finish(response.statusCode === 200 && /<title>\s*DeepSeek Harness\s*<\/title>/i.test(body));
-      });
+function persistentDaemon() {
+  if (!daemonController) {
+    daemonController = new DaemonController({
+      execPath: process.execPath,
+      appRoot: __dirname,
+      userData: app.getPath("userData"),
+      profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
+      version: app.getVersion(),
+      port: 3080,
+      log,
+      onPortOpen: () => { void startBackendNavigation(); },
     });
-    request.on("error", () => finish(false));
-    request.setTimeout(timeout, () => { request.destroy(); finish(false); });
-  });
+  }
+  return daemonController;
 }
 
-async function ensureDshBackend() {
-  if (await portOpen(3080)) {
-    if (await isDshBackend(3080)) {
-      log("existing DeepSeek Harness on 3080, reuse without replacing it");
-      return true;
-    }
-    log("3080 is occupied by a non-Harness service");
-    return false;
-  }
-  const backend = resolveBackend();
+async function ensurePersistentBackend() {
+  const backend = persistentBackendSpec();
   if (!backend) { log("bundled backend runtime is missing"); return false; }
-  if (backend.cwd) {
-    try {
-      const profilePrebundle = await prepareProfilePrebundles({
-        profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
-        runtimeRoot: backend.cwd,
-        stateDir: app.getPath("userData"),
-        onLog: log,
-      });
-      log("profile prebundle " + JSON.stringify(profilePrebundle));
-    } catch (e) {
-      log("profile prebundle unavailable, continuing with original modules: " + e.message);
-    }
-  }
-  // v2.2.1-gate：后端 stdout/stderr 汇流写入 dsh_backend.log（每次启动截断，
-  // 旧文件先重命名为 .prev；约 2MB 上限，超出后停止写入；出错静默降级）
-  const backendLogPath = path.join(app.getPath("userData"), "dsh_backend.log");
-  const BACKEND_LOG_LIMIT = 2 * 1024 * 1024;
-  let backendLogClosed = false;
-  try {
-    if (fs.existsSync(backendLogPath)) {
-      try { fs.renameSync(backendLogPath, backendLogPath + ".prev"); } catch (e) {}
-    }
-    fs.writeFileSync(backendLogPath, `[${new Date().toISOString()}] dsh backend log start\n`);
-  } catch (e) { backendLogClosed = true; }
-  let backendLogSize = 0;
-  try { backendLogSize = fs.statSync(backendLogPath).size; } catch (e) {}
-  const appendBackendLog = (label, chunk) => {
-    if (backendLogClosed) return;
-    try {
-      const text = `[${label}] ` + chunk.toString();
-      if (backendLogSize + Buffer.byteLength(text) > BACKEND_LOG_LIMIT) {
-        backendLogClosed = true;
-        fs.appendFileSync(backendLogPath, "\n[dsh-desktop] log size limit reached, further output dropped\n");
-        return;
+  const result = await persistentDaemon().ensure(backend, {
+    beforeLaunch: async () => {
+      healOrphanedSettingsLock();
+      if (!backend.cwd) return;
+      try {
+        const prepared = await prepareProfilePrebundles({
+          profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
+          runtimeRoot: backend.cwd,
+          stateDir: app.getPath("userData"),
+          onLog: log,
+        });
+        log("profile prebundle " + JSON.stringify(prepared));
+      } catch (error) {
+        log("profile prebundle unavailable, continuing with original modules: " + error.message);
       }
-      backendLogSize += Buffer.byteLength(text);
-      fs.appendFileSync(backendLogPath, text);
-    } catch (e) { backendLogClosed = true; }
-  };
-  let backendReady = false;
-  let backendAnnouncedReady = false;
-  let backendStartupSettled = false;
-  // v3.0.1-fix：原逻辑仅允许 1 次 respawn，且无退避间隔，后端运行中崩溃完全不重试。
-  // 改为最多 3 次重试 + 指数退避（1s/4s/16s），运行中崩溃也重试。
-  let respawnCount = 0;
-  const MAX_RESPAWN = 3;
-
-const startBackend = (attempt) => {
-    try {
-      backendAnnouncedReady = false;
-      backendStartupSettled = false;
-      // v3.0.1-fix：每次启动后端前都调用 healOrphanedSettingsLock()。
-      try { healOrphanedSettingsLock(); } catch (e) {}
-      dshProc = spawn(
-        backend.command,
-        backend.args,
-        {
-          cwd: backend.cwd,
-          windowsHide: true,
-          env: { ...process.env, ...backend.env },
-          stdio: ["ignore", "pipe", "pipe"],
-        }
-      );
-      log("spawned backend pid=" + dshProc.pid + " attempt=" + attempt);
-      const spawnStartedAt = Date.now();
-      const spawnedBackend = dshProc;
-      void (async () => {
-        for (let i = 0; i < 3000; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-          if (dshProc !== spawnedBackend || spawnedBackend.exitCode !== null) return;
-          if (await portOpen(3080, 100)) {
-            log("backend port-open after " + (Date.now() - spawnStartedAt) + "ms");
-            void startBackendNavigation();
-            return;
-          }
-        }
-      })();
-      let firstOutputAt = null;
-      let readyKeywordAt = null;
-      let readinessTail = "";
-      // v3.1.3（issue #5）：保留 stderr 尾部（64KB），供崩溃时定位坏插件
-      let stderrTail = "";
-      const onOutput = (label) => (chunk) => {
-        const text = chunk.toString();
-        if (firstOutputAt === null) {
-          firstOutputAt = Date.now();
-          log("backend first-output after " + (firstOutputAt - spawnStartedAt) + "ms");
-        }
-        appendBackendLog(label, chunk);
-        if (label === "stderr") stderrTail = (stderrTail + text).slice(-65536);
-        readinessTail = (readinessTail + text).slice(-2048);
-        if (!backendAnnouncedReady && /\bdsh web:\s*http/i.test(readinessTail)) {
-          backendAnnouncedReady = true;
-          log("backend service-announced after " + (Date.now() - spawnStartedAt) + "ms");
-        }
-        if (!backendStartupSettled && /\[dsh-startup\] compile cache flushed/.test(readinessTail)) {
-          backendStartupSettled = true;
-          log("backend startup-settled after " + (Date.now() - spawnStartedAt) + "ms");
-        }
-        if (readyKeywordAt === null && /\b(listening|started|ready)\b/i.test(text)) {
-          readyKeywordAt = Date.now();
-          log("backend ready-keyword after " + (readyKeywordAt - spawnStartedAt) + "ms");
-        }
-      };
-      if (dshProc.stdout) dshProc.stdout.on("data", onOutput("stdout"));
-      if (dshProc.stderr) dshProc.stderr.on("data", onOutput("stderr"));
-      dshProc.on("error", (e) => log("spawn error: " + e.message));
-      dshProc.on("exit", (c) => {
-        log("backend exited code=" + c);
-        // v3.1.2-deep：更新/退出中不 respawn。原逻辑在更新杀后端后 1s 内重启
-        // 后端，node.exe 重新锁住安装目录 → NSIS"无法关闭"→ 更新失败死循环。
-        if (isQuitting) { log("skip respawn: quitting"); return; }
-        const wasReady = backendReady;
-        if (respawnCount < MAX_RESPAWN && c !== 0) {
-          // v3.1.3（issue #5）：启动即崩（plugin tree failed to load）时先隔离
-          // 坏插件再 respawn，单插件故障不再拖垮整个 backend/桌面端。
-          if (!wasReady) quarantineBrokenPlugin(stderrTail);
-          respawnCount++;
-          const delayMs = Math.pow(4, respawnCount - 1) * 1000;
-          if (wasReady) {
-            backendReady = false;
-            backendReadyAt = 0;
-          }
-          log("backend respawn attempt=" + respawnCount + " after " + delayMs + "ms");
-          setTimeout(() => startBackend(attempt + respawnCount), delayMs);
-        } else if (respawnCount >= MAX_RESPAWN) {
-          log("backend respawn max attempts reached, giving up");
-        }
-      });
-    } catch (e) { log("spawn threw: " + e.message); }
-  };
-  startBackend(1);
-  const startedAt = Date.now();
-  let lastLoadingUpdateMs = 0;
-  for (let i = 0; i < 600; i++) {
-    await new Promise((r) => setTimeout(r, 250));
-    if (backendAnnouncedReady && backendStartupSettled && await portOpen(3080)) {
-      backendReady = true;
-      backendReadyAt = Date.now();
-      log("backend ready after " + ((i + 1) * 250) + "ms");
-      return true;
-    }
-    // v2.2.1-gate：loading 页文案附加已耗时秒数；超过 60 秒提示可能被杀毒软件拖慢
-    const elapsedMs = Date.now() - startedAt;
-    if (elapsedMs - lastLoadingUpdateMs >= 1000 && mainWindow && !mainWindow.isDestroyed()) {
-      lastLoadingUpdateMs = elapsedMs;
-      const seconds = Math.floor(elapsedMs / 1000);
-      const slowHint = seconds > 60 ? "，启动较慢，可能被杀毒软件扫描拖慢" : "";
-      const loadingContents = startupWebContents();
-      if (loadingContents) loadingContents.executeJavaScript(`
-        (function () {
-          var detail = document.querySelector('[data-detail]');
-          if (detail) detail.textContent = '首次启动可能需要约一分钟，已等待 ' + ${seconds} + ' 秒' + ${JSON.stringify(slowHint)};
-        })();
-      `).catch(() => {});
-    }
+    },
+  });
+  if (!result.ok) log("daemon backend failed: " + result.reason);
+  else {
+    backendReadyAt = Date.now();
+    log(`persistent backend ready reused=${Boolean(result.reused)} elapsed=${result.elapsedMs || 0}ms`);
   }
-  log("backend timeout after 150s");
-  return false;
+  return result.ok;
 }
 
   // v3.1：插件安装/卸载后自动刷新 Web UI。只 stat 轮询 package.json 与
@@ -737,7 +520,7 @@ async function injectWindowChrome() {
 
       // v3.1.2-fix：移除 bindQuitButton。它用 stopImmediatePropagation 拦截
       // click 事件，但选择器太宽泛可能匹配错误按钮，导致正常退出被阻止。
-      // 退出改由 ipcMain.on("win:close") 直接 app.quit() + taskkill 清理。
+      // 普通关闭由主窗口隐藏保活；Ctrl+Q 与安装更新负责显式退出。
 
       function ensureChrome() {
         if (!document.body) return;
@@ -1341,15 +1124,17 @@ function createWindow() {
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
   mainWindow.on("resize", layoutStartupOverlay);
+  mainWindow.on("close", (event) => {
+    if (isQuitting || installInFlight) return;
+    event.preventDefault();
+    mainWindow.hide();
+    log("window hidden for instant reopen");
+  });
   mainWindow.on("closed", () => {
     stopControlsMotion();
     mainWindow = null;
     controlsView = null;
     startupView = null;
-    // v3.1.2-deep：杀整棵进程树（含 esbuild/ripgrep 等子进程），防退出挂起
-    isQuitting = true;
-    killBackendTree();
-    app.quit();
   });
 }
 
@@ -1368,6 +1153,7 @@ async function focusMainWindow(taskUrl) {
   if (!mainWindow.isVisible()) mainWindow.show();
   mainWindow.moveTop();
   mainWindow.focus();
+  log("window restored from second instance");
   const target = safeTaskUrl(taskUrl);
   if (target && mainWindow.webContents.getURL() !== target) {
     try { await mainWindow.loadURL(taskUrl); }
@@ -1448,7 +1234,7 @@ ipcMain.handle("app:install-update", (event) => {
   // ripgrep/conpty 子进程锁文件占用端口。修复：先标记退出（阻断 respawn）→
   // 杀整棵进程树（释放文件锁与端口）→ 静默安装（无对话框）→ 看门狗兜底强退。
   isQuitting = true;
-  killBackendTree();
+  stopBackendForUpdate();
   try { if (controlsView) { controlsView = null; } } catch (e) {}
   autoUpdater.quitAndInstall(true, true);
   // 看门狗：若 app.quit() 被未知句柄阻塞，4s 后直接拉起安装器并强退自身。
@@ -1489,22 +1275,37 @@ if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     if (process.platform === "win32") app.setAppUserModelId(APP_ID);
     log("app ready");
+    configureLoginPrewarm();
     loadControlState();
+
+    if (!isDaemonPrewarm) {
+      createWindow();
+      initializeUpdater();
+      log("window created");
+    }
+
+    // 先把本地壳交给 Chromium 绘制，再执行运行时兼容和 profile 准备。
+    await new Promise((resolve) => setImmediate(resolve));
     healOrphanedSettingsLock();
     applyRuntimePatches();
     reconcileProviders();
-    // v3.0.1-fix：注册 Ctrl+Q 全局快捷键作为退出兜底。
-    try {
-      globalShortcut.register("CommandOrControl+Q", () => {
-        log("quit via Ctrl+Q shortcut");
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
-      });
-    } catch (e) { log("global shortcut register failed: " + e.message); }
-    const backendPromise = ensureDshBackend();
-    createWindow();
-    initializeUpdater();
-    log("window created");
-    const ok = await backendPromise;
+
+    if (!isDaemonPrewarm) {
+      try {
+        globalShortcut.register("CommandOrControl+Q", () => {
+          log("quit via Ctrl+Q shortcut");
+          isQuitting = true;
+          app.quit();
+        });
+      } catch (e) { log("global shortcut register failed: " + e.message); }
+    }
+
+    const ok = await ensurePersistentBackend();
+    if (isDaemonPrewarm) {
+      log(`daemon prewarm completed ok=${ok}`);
+      app.quit();
+      return;
+    }
     // v3.1：后端就绪后再挂清单监视器（启动期 pnpm 自检不再触发重载）。
     // 更新检查仍只由用户点击侧栏按钮发起（见 tests/manual_runtime_v2.test.js 契约）。
     watchProfileChanges();
@@ -1522,20 +1323,20 @@ if (hasSingleInstanceLock) {
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
       await transitionToBackend();
+      if (benchmarkHideAfterReady) {
+        mainWindow.hide();
+        log("benchmark window hidden");
+      }
     }
   });
 }
 
 app.on("window-all-closed", () => {
   try { globalShortcut.unregisterAll(); } catch (e) {}
-  // v3.1.2-deep：杀整棵进程树，防退出挂起与文件锁残留
   isQuitting = true;
-  killBackendTree();
   app.quit();
 });
 
-// v3.1.2-deep：任何退出路径（含 app.quit 级联）都先阻断 respawn 并清理进程树
 app.on("before-quit", () => {
   isQuitting = true;
-  if (dshProc) killBackendTree();
 });

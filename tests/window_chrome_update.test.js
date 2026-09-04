@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "main.js"), "utf8");
+const daemonController = fs.readFileSync(path.join(root, "runtime", "daemon-controller.cjs"), "utf8");
 const preload = fs.readFileSync(path.join(root, "preload.js"), "utf8");
 const controlsPath = path.join(root, "window-controls.html");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -24,11 +25,14 @@ assert.match(main, /contentView\.addChildView/);
 assert.match(main, /requestSingleInstanceLock/, "a second launch must reuse the existing app instance");
 assert.match(main, /second-instance/, "the primary instance must handle a repeated launch");
 assert.match(main, /isMinimized\(\)[\s\S]*restore\(\)[\s\S]*focus\(\)/, "a repeated launch must restore and focus the existing window");
-assert.match(main, /isDshBackend/, "an occupied 3080 port must be verified before reuse");
-assert.match(main, /occupied by a non-Harness service/, "foreign services on 3080 must fail clearly instead of being opened");
+assert.match(daemonController, /isDshBackend/, "an occupied 3080 port must be verified before reuse");
+assert.match(daemonController, /reason:\s*"port-occupied"/,
+  "foreign services on 3080 must fail clearly instead of being opened");
 assert.match(main, /loadFile\([^)]*loading\.html/,
   "v3.2 must show its local startup surface while the independent backend initializes");
-assert.match(main, /const backendPromise = ensureDshBackend\(\);[\s\S]*createWindow\(\);[\s\S]*await backendPromise/, "backend startup and immediate window creation should overlap");
+assert.match(main,
+  /if \(!isDaemonPrewarm\)[\s\S]*createWindow\(\);[\s\S]*setImmediate[\s\S]*await ensurePersistentBackend\(\)/,
+  "the local shell must paint before the persistent backend is connected or launched");
 assert.match(main, /CONTROL_COLLAPSED_X\s*=\s*4/, "collapsed controls must stay inside the 56px rail");
 assert.match(main, /CONTROL_Y\s*=\s*3/, "controls must sit slightly lower");
 assert.match(main, /width:\s*48,\s*height:\s*18/, "controls surface must expose three 16px hit targets");

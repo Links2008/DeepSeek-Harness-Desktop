@@ -25,6 +25,26 @@ function Stop-InstalledProcesses {
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+function Wait-LogMatch {
+  param([string]$Path, [long]$Offset, [string]$Pattern, [int]$TimeoutSeconds)
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  while ([DateTime]::UtcNow -lt $deadline) {
+    if (Test-Path -LiteralPath $Path) {
+      $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+      try {
+        if ($stream.Length -gt $Offset) {
+          $stream.Seek($Offset, 'Begin') | Out-Null
+          $reader = [IO.StreamReader]::new($stream)
+          try { if ($reader.ReadToEnd() -match $Pattern) { return $true } }
+          finally { $reader.Dispose() }
+        }
+      } finally { $stream.Dispose() }
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  return $false
+}
+
 function Invoke-ElectronNode {
   param([string]$AppPath, [string[]]$Arguments)
   $stdout = [IO.Path]::GetTempFileName()
@@ -46,28 +66,44 @@ function Invoke-ElectronNode {
 }
 
 function Start-DesktopApp {
-  param([string]$AppPath)
+  param([string]$AppPath, [string]$UserDataPath, [string]$HomePath)
   $stdout = [IO.Path]::GetTempFileName()
   $stderr = [IO.Path]::GetTempFileName()
-  # The probes intentionally run this binary as Node. Strip both current and
-  # legacy flags from the GUI child itself instead of mutating the parent shell.
-  $process = Start-Process $AppPath -WindowStyle Hidden `
-    -Environment @{
-      ELECTRON_RUN_AS_NODE = $null
-      ATOM_SHELL_INTERNAL_RUN_AS_NODE = $null
-    } -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-  return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
+  # Windows PowerShell 5.1 has no Start-Process -Environment. Clear the two
+  # inherited Node-mode flags only while creating the GUI child, then restore.
+  $arguments = @("--user-data-dir=$UserDataPath", '--no-login-prewarm')
+  $previousRunAsNode = [Environment]::GetEnvironmentVariable('ELECTRON_RUN_AS_NODE', 'Process')
+  $previousAtomRunAsNode = [Environment]::GetEnvironmentVariable('ATOM_SHELL_INTERNAL_RUN_AS_NODE', 'Process')
+  $previousUserProfile = [Environment]::GetEnvironmentVariable('USERPROFILE', 'Process')
+  $previousDshHome = [Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
+  try {
+    Remove-Item Env:ELECTRON_RUN_AS_NODE, Env:ATOM_SHELL_INTERNAL_RUN_AS_NODE -ErrorAction SilentlyContinue
+    [Environment]::SetEnvironmentVariable('USERPROFILE', $HomePath, 'Process')
+    [Environment]::SetEnvironmentVariable('DSH_HOME', $HomePath, 'Process')
+    $process = Start-Process $AppPath -ArgumentList $arguments -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    return [pscustomobject]@{ Process = $process; Stdout = $stdout; Stderr = $stderr }
+  } finally {
+    [Environment]::SetEnvironmentVariable('ELECTRON_RUN_AS_NODE', $previousRunAsNode, 'Process')
+    [Environment]::SetEnvironmentVariable('ATOM_SHELL_INTERNAL_RUN_AS_NODE', $previousAtomRunAsNode, 'Process')
+    [Environment]::SetEnvironmentVariable('USERPROFILE', $previousUserProfile, 'Process')
+    [Environment]::SetEnvironmentVariable('DSH_HOME', $previousDshHome, 'Process')
+  }
 }
 
 $installerPath = (Resolve-Path $Installer).Path
 $acceptanceTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-$installRoot = Join-Path $acceptanceTemp "DeepSeekHarness-$ExpectedVersion"
+$acceptanceRunId = "$PID-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+$installRoot = Join-Path $acceptanceTemp "dsh-i-$acceptanceRunId"
 $appPath = Join-Path $installRoot 'DeepSeekHarness.exe'
+$acceptanceUserData = Join-Path $acceptanceTemp "dsh-u-$acceptanceRunId"
+$acceptanceHome = Join-Path $acceptanceTemp "dsh-h-$acceptanceRunId"
 $accepted = $false
 $desktop = $null
 $cleanupProblems = [Collections.Generic.List[string]]::new()
 
 if (Test-Path -LiteralPath $installRoot) { throw "Temporary install root already exists: $installRoot" }
+if (Test-Path -LiteralPath $acceptanceUserData) { throw "Temporary user-data root already exists: $acceptanceUserData" }
 if (Test-LocalPort 3080) { throw 'Port 3080 was already occupied before acceptance testing' }
 
 & 'C:\Program Files\7-Zip\7z.exe' t $installerPath
@@ -75,7 +111,10 @@ if ($LASTEXITCODE -ne 0) { throw '7-Zip rejected the installer archive' }
 
 try {
   $install = Start-Process $installerPath -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -PassThru
-  $install.WaitForExit()
+  if (!$install.WaitForExit(600000)) {
+    Stop-Process -Id $install.Id -Force -ErrorAction SilentlyContinue
+    throw 'Installer did not finish within 600 seconds'
+  }
   if ($install.ExitCode -ne 0) { throw "Installer failed with exit code $($install.ExitCode)" }
   if (!(Test-Path -LiteralPath $appPath)) { throw 'Installed executable is missing' }
 
@@ -111,13 +150,17 @@ try {
   }
   if (!$registeredApp) { throw 'Start Menu AppID com.deepseek.dsh is not registered' }
 
-  $desktop = Start-DesktopApp $appPath
+  New-Item -ItemType Directory -Path $acceptanceUserData, $acceptanceHome | Out-Null
+  $desktopLog = Join-Path $acceptanceUserData 'dsh_desktop.log'
+  $coldWatch = [Diagnostics.Stopwatch]::StartNew()
+  $desktop = Start-DesktopApp $appPath $acceptanceUserData $acceptanceHome
   $ready = $false
-  for ($attempt = 0; $attempt -lt 75; $attempt++) {
-    Start-Sleep -Seconds 2
+  $readyDeadline = [DateTime]::UtcNow.AddSeconds(150)
+  while ([DateTime]::UtcNow -lt $readyDeadline) {
+    Start-Sleep -Milliseconds 500
     if ($desktop.Process.HasExited) { break }
     try {
-      $response = Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 3
+      $response = Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 1
       if ($response.StatusCode -eq 200 -and $response.Content -match '<title>\s*DeepSeek Harness\s*</title>') {
         $ready = $true
         break
@@ -133,7 +176,7 @@ try {
       Write-Host "desktop process exited with code $($desktop.Process.ExitCode) before HTTP readiness"
     }
     foreach ($logName in @('dsh_desktop.log', 'dsh_backend.log')) {
-      $logPath = Join-Path $env:APPDATA "DeepSeekHarness\$logName"
+      $logPath = Join-Path $acceptanceUserData $logName
       if (Test-Path -LiteralPath $logPath) {
         Write-Host "----- tail of $logName -----"
         Get-Content -LiteralPath $logPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
@@ -143,6 +186,28 @@ try {
     }
     throw 'Installed runtime did not return the expected HTTP 200 page'
   }
+  $coldHttpMs = $coldWatch.ElapsedMilliseconds
+  if (!(Wait-LogMatch $desktopLog 0 'backend paint-ready' 15)) {
+    throw 'Cold start reached HTTP 200 but not renderer paint-ready'
+  }
+  $coldPaintMs = $coldWatch.ElapsedMilliseconds
+
+  Stop-Process -Id $desktop.Process.Id -Force -ErrorAction SilentlyContinue
+  $desktop.Process.WaitForExit(10000) | Out-Null
+  $desktop.Process.Dispose()
+  Remove-Item -LiteralPath $desktop.Stdout, $desktop.Stderr -Force -ErrorAction SilentlyContinue
+  $warmOffset = if (Test-Path -LiteralPath $desktopLog) { (Get-Item -LiteralPath $desktopLog).Length } else { 0 }
+  $warmWatch = [Diagnostics.Stopwatch]::StartNew()
+  $desktop = Start-DesktopApp $appPath $acceptanceUserData $acceptanceHome
+  if (!(Wait-LogMatch $desktopLog $warmOffset 'persistent backend ready reused=true' 10)) {
+    throw 'Warm start did not reuse the persistent daemon'
+  }
+  $warmDaemonMs = $warmWatch.ElapsedMilliseconds
+  if (!(Wait-LogMatch $desktopLog $warmOffset 'backend paint-ready' 10)) {
+    throw 'Warm start reused the daemon but did not reach renderer paint-ready'
+  }
+  $warmPaintMs = $warmWatch.ElapsedMilliseconds
+  Write-Host "Startup timing ms: cold-http=$coldHttpMs cold-paint=$coldPaintMs warm-daemon=$warmDaemonMs warm-paint=$warmPaintMs"
   $accepted = $true
 } finally {
   Stop-InstalledProcesses $installRoot
@@ -181,6 +246,12 @@ try {
     $message = $cleanupProblems -join '; '
     if ($accepted) { throw $message }
     Write-Warning "Cleanup also reported: $message"
+  }
+  if (Test-Path -LiteralPath $acceptanceUserData) {
+    Remove-Item -LiteralPath $acceptanceUserData -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  if (Test-Path -LiteralPath $acceptanceHome) {
+    Remove-Item -LiteralPath $acceptanceHome -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 
