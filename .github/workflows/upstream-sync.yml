@@ -1,4 +1,4 @@
-name: Follow DeepSeek Harness upstream
+name: Validate DeepSeek Harness upstream
 
 on:
   push:
@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-test-release:
+  build-test:
     runs-on: windows-latest
     steps:
       - name: Check out desktop shell
@@ -48,11 +48,21 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Resolve upstream revision
+        id: upstream
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
+          $ref = if ('${{ github.event_name }}' -eq 'schedule') { $lock.branch } else { $lock.commit }
+          if (!$ref) { throw 'upstream-lock.json does not define the required revision' }
+          "ref=$ref" >> $env:GITHUB_OUTPUT
+
       - name: Check out DeepSeek Harness
         uses: actions/checkout@v7
         with:
           repository: deepseek-ai/deepseek-harness
-          ref: master
+          ref: ${{ steps.upstream.outputs.ref }}
           path: upstream
 
       - name: Inspect upstream and release state

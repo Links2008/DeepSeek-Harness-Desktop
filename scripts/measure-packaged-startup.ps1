@@ -13,8 +13,14 @@ $isolatedHome = Join-Path $tempRoot "dsh-packaged-home-$runId"
 $desktop = $null
 
 function Test-DshHttp {
+  param([string]$UserDataPath)
   try {
-    $response = Invoke-WebRequest 'http://127.0.0.1:3080' -UseBasicParsing -TimeoutSec 1
+    $state = Get-Content (Join-Path $UserDataPath 'daemon-state.json') -Raw | ConvertFrom-Json
+    $candidate = [Uri]$state.serviceUrl
+    if ($candidate.Scheme -ne 'http' -or $candidate.Host -ne '127.0.0.1' -or $candidate.Port -ne 3080) {
+      return $false
+    }
+    $response = Invoke-WebRequest $candidate.AbsoluteUri -UseBasicParsing -TimeoutSec 1
     return $response.StatusCode -eq 200 -and $response.Content -match '<title>\s*DeepSeek Harness\s*</title>'
   } catch { return $false }
 }
@@ -64,10 +70,10 @@ try {
   $cold = [Diagnostics.Stopwatch]::StartNew()
   $desktop = Start-IsolatedDesktop -ExtraArgs @('--benchmark-hide-after-ready')
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-  while ([DateTime]::UtcNow -lt $deadline -and !$desktop.HasExited -and !(Test-DshHttp)) {
+  while ([DateTime]::UtcNow -lt $deadline -and !$desktop.HasExited -and !(Test-DshHttp $userData)) {
     Start-Sleep -Milliseconds 200
   }
-  if (!(Test-DshHttp)) { throw 'Packaged cold start did not reach HTTP readiness' }
+  if (!(Test-DshHttp $userData)) { throw 'Packaged cold start did not reach HTTP readiness' }
   $coldHttpMs = $cold.ElapsedMilliseconds
   if (!(Wait-NewLogText $logPath 0 'backend paint-ready' $deadline)) {
     throw 'Packaged cold start did not reach renderer paint-ready'

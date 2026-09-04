@@ -24,7 +24,7 @@
 </p>
 
 > [!IMPORTANT]
-> **v4.0.0 是重大升级。** 桌面端改为“轻量窗口壳 + 常驻用户级 daemon”：窗口关闭后任务和 Harness 后端继续运行，再次打开直接复用；同时由 Electron 直接承载 Node，显著缩小安装包。v3 的配置、会话、凭据和插件目录继续保留。
+> **v4 是重大架构升级；v4.0.1 是首个稳定性更新。** 桌面端改为“轻量窗口壳 + 常驻用户级 daemon”：窗口关闭后任务和 Harness 后端继续运行，再次打开直接复用；同时由 Electron 直接承载 Node，显著缩小安装包。v4.0.1 进一步适配上游带随机 token 的本机 Web 地址，并修复长期失败的发布验收链路。v3 的配置、会话、凭据和插件目录继续保留。
 
 ## 产品预览
 
@@ -52,7 +52,7 @@
 - runtime 不再携带 PDB、ARM64 预构建、测试夹具、TypeScript 类型源码和包内示例文档。
 - 保留完整离线安装：Harness runtime、原生终端、图片处理和插件能力仍随安装包提供。
 - NSIS 使用 7z 与 blockmap 差分更新，不再使用易卡住且体积更大的 ZIP 载荷。
-- v4.0.0 安装包为 **120,798,827 字节（115.20 MiB）**，较 v3 基线减少 **99.20 MiB / 46.27%**；Release 同时公布 SHA-256 供复核。
+- v4.0.1 安装包为 **125,255,184 字节（119.45 MiB）**，较 v3 基线减少 **94.95 MiB / 44.29%**；Release 同时公布 SHA-256 供复核。
 
 ### 2. 冷启动和首屏响应
 
@@ -79,7 +79,7 @@
 - 单个第三方插件缺失构建产物时可隔离故障项，避免拖垮整个后端。
 - DSH-IM 等社区插件仍由用户 profile 管理，桌面安装包不把个人插件和配置写入公共制品。
 
-完整升级说明见 [v4.0.0 Release Notes](release-notes-v4.0.0.md)。
+完整升级说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
 
 ## 为什么选择桌面版
 
@@ -95,7 +95,7 @@
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载 `DeepSeekHarness-Setup-4.0.0.exe`。
+2. 下载 `DeepSeekHarness-Setup-4.0.1.exe`。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -110,13 +110,15 @@
 
 GitHub Actions 仅以只读权限执行测试、归档、SHA-512、隔离安装、AppID、Harness 版本、HTTP 200、原生模块、端口释放和卸载验收，不提交代码或发布 Release。通过后由 `Links2008` 身份人工核对制品并发布为 Latest。
 
+维护者可在本机安装并登录 GitHub CLI 后运行 `npm run release:github`。该命令会在发布前校验账号不是 bot、工作树和 `origin/main` 一致、当前 HEAD 的只读 Actions 已成功、标签未被占用、EXE/blockmap/`latest.yml` 完整且 SHA-512 相符；任何一项不满足都会拒绝发布。提交和人工触发验收使用 `upstream-lock.json` 的固定 commit，只有每日定时兼容性监控跟踪上游 `master`。
+
 ## 上游与版本谱系
 
 本仓库是独立的 Windows 桌面发行仓库，核心能力来自官方 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)。
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面版本 | `4.0.0` |
+| 桌面版本 | `4.0.1` |
 | Harness 版本 | 见 [`upstream-lock.json`](upstream-lock.json) |
 | 上游分支 | `master` |
 | 锁定提交 | 见 [`upstream-lock.json`](upstream-lock.json) |

@@ -42,9 +42,12 @@ assert.equal(isReusableState({ version: "3.2.3", port: 3080 }, { version: "4.0.0
 
 assert.match(hostSource, /net\.createServer/);
 assert.match(hostSource, /request\.token\s*!==\s*config\.token/);
+assert.match(hostSource, /serviceUrl/, "the daemon must preserve the token-bearing URL announced by Harness");
 assert.match(hostSource, /MAX_RESPAWN\s*=\s*3/);
 assert.match(hostSource, /quarantineBrokenPlugin\(stderrTail\)/);
 assert.match(main, /new DaemonController\(/);
+assert.match(main, /startBackendNavigation\(serviceUrl\)/,
+  "the desktop must navigate to the authenticated URL supplied by the daemon");
 assert.match(main, /--daemon-prewarm/);
 assert.match(main, /setLoginItemSettings/);
 assert.match(main, /--no-login-prewarm/);
@@ -68,6 +71,7 @@ assert.match(builder, /runtime\/daemon-host\.cjs/);
 assert.match(verifier, /\$acceptanceUserData/);
 assert.match(verifier, /--user-data-dir=/);
 assert.match(verifier, /--no-login-prewarm/);
-assert.match(verifier, /Join-Path \$acceptanceUserData \$logName/);
+assert.match(verifier, /Join-Path \$UserDataPath \$logName/,
+  "failure diagnostics must read logs from the isolated acceptance profile");
 
 console.log("persistent daemon architecture verified");

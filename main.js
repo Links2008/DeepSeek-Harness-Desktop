@@ -57,6 +57,7 @@ let lastExpanded = null;
 let startupEntryArmed = false;
 let backendPagePreparedResolve = null;
 let backendNavigationPromise = null;
+let backendServiceUrl = URL;
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -226,7 +227,7 @@ function persistentDaemon() {
       version: app.getVersion(),
       port: 3080,
       log,
-      onPortOpen: () => { void startBackendNavigation(); },
+      onPortOpen: (serviceUrl) => { void startBackendNavigation(serviceUrl); },
     });
   }
   return daemonController;
@@ -1021,15 +1022,16 @@ async function waitForBackendPaint() {
   if (paintState) log("backend paint-ready " + JSON.stringify(paintState));
 }
 
-function startBackendNavigation() {
+function startBackendNavigation(serviceUrl = backendServiceUrl) {
   if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve(false);
   if (backendNavigationPromise) return backendNavigationPromise;
+  backendServiceUrl = serviceUrl || URL;
   startupEntryArmed = true;
   const navigation = (async () => {
     let navigationFailed = false;
     const prepared = new Promise((resolve) => { backendPagePreparedResolve = resolve; });
     log("backend navigation started behind overlay");
-    mainWindow.loadURL(URL).catch((e) => {
+    mainWindow.loadURL(backendServiceUrl).catch((e) => {
       navigationFailed = true;
       log("load error: " + e.message);
       if (backendPagePreparedResolve) backendPagePreparedResolve();

@@ -21,7 +21,7 @@ assert.match(readme, /`master`/);
 assert.doesNotMatch(readme, /deepseek-ai\/deepseek-harness\/commit\/[0-9a-f]{40}/,
   "README must use upstream-lock.json instead of a commit that becomes stale on every sync");
 assert.match(readme, /Links2008/);
-assert.match(readme, /v4\.0\.0 是重大升级/);
+assert.match(readme, /v4 是重大架构升级；v4\.0\.1 是首个稳定性更新/);
 assert.match(readme, /安装包轻量化/);
 assert.match(readme, /DSH-IM/);
 assert.match(builder, /repo:\s*DeepSeek-Harness-Desktop/);
@@ -35,7 +35,7 @@ assert.match(lock.commit, /^[0-9a-f]{40}$/,
 const releaseNotes = fs.readdirSync(root)
   .filter((name) => /^release-notes-.*\.md$/.test(name))
   .sort();
-assert.deepEqual(releaseNotes, ["release-notes-v4.0.0.md"],
+assert.deepEqual(releaseNotes, ["release-notes-v4.0.1.md"],
   "only the maintained v4 release notes should remain in the repository");
 
 for (const match of readme.matchAll(/\]\((?!https?:\/\/)([^)#]+)(?:#[^)]+)?\)/g)) {

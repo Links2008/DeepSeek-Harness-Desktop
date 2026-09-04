@@ -37,8 +37,8 @@ assert.match(daemonHost, /env:\s*\{\s*\.\.\.process\.env,\s*\.\.\.spec\.env\s*\}
   "backend spawn must inherit the cache environment without dropping the user environment");
 assert.match(main, /app\.getPath\("userData"\)/,
   "the compile cache must live under durable user data rather than the disposable temp directory");
-assert.match(daemonHost, /dsh web:\\s\*http/,
-  "renderer reveal must observe the backend's explicit service-ready announcement");
+assert.match(daemonHost, /serviceUrlFromAnnouncement[\s\S]*dsh web:/,
+  "renderer reveal must observe and preserve the backend's explicit service-ready URL");
 assert.match(daemonHost, /compile cache flushed/,
   "renderer reveal must observe the post-plugin-tree startup settlement signal");
 assert.match(daemonHost, /status:\s*serviceAnnounced\s*\?\s*"ready"\s*:\s*"settling"/,
@@ -55,10 +55,10 @@ assert.match(main, /contentView\.addChildView\(startupView\)/,
   "the startup overlay must be attached above the backend document");
 assert.match(main, /function createWindow\(\)[\s\S]*backgroundThrottling:\s*false/,
   "the backend renderer must keep painting while it is covered by the startup view");
-assert.match(main, /function startBackendNavigation\(\)[\s\S]*mainWindow\.loadURL\(URL\)/,
+assert.match(main, /function startBackendNavigation\(serviceUrl = backendServiceUrl\)[\s\S]*mainWindow\.loadURL\(backendServiceUrl\)/,
   "backend navigation must have one idempotent preload path behind the startup overlay");
-assert.match(daemonController, /backend port-open after [\s\S]*this\.onPortOpen\(\)/,
-  "the renderer must begin loading as soon as the owned backend socket opens");
+assert.match(daemonController, /state\?\.serviceUrl[\s\S]*this\.onPortOpen\(state\.serviceUrl\)/,
+  "the renderer must begin loading as soon as the authenticated backend URL responds");
 assert.match(main, /async function transitionToBackend\(\)[\s\S]*await startBackendNavigation\(\)[\s\S]*revealBackendEntry[\s\S]*waitForBackendPaint[\s\S]*dshBeginStartupExit/,
   "the settled backend must reuse the preloaded document and only then release the overlay");
 assert.match(main, /revealBackendEntry\(\);\s*let paintFallbackTimer/,

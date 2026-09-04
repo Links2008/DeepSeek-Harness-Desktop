@@ -25,6 +25,27 @@ function Stop-InstalledProcesses {
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+function Get-DshServiceUrl {
+  param([string]$UserDataPath)
+  $fallback = 'http://127.0.0.1:3080/'
+  try {
+    $state = Get-Content (Join-Path $UserDataPath 'daemon-state.json') -Raw | ConvertFrom-Json
+    $candidate = [Uri]$state.serviceUrl
+    if ($candidate.Scheme -eq 'http' -and $candidate.Host -eq '127.0.0.1' -and $candidate.Port -eq 3080) {
+      return $candidate.AbsoluteUri
+    }
+  } catch {}
+  return $fallback
+}
+
+function Test-DshHttp {
+  param([string]$UserDataPath)
+  try {
+    $response = Invoke-WebRequest (Get-DshServiceUrl $UserDataPath) -UseBasicParsing -TimeoutSec 1
+    return $response.StatusCode -eq 200 -and $response.Content -match '<title>\s*DeepSeek Harness\s*</title>'
+  } catch { return $false }
+}
+
 function Wait-LogMatch {
   param([string]$Path, [long]$Offset, [string]$Pattern, [int]$TimeoutSeconds)
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -43,6 +64,19 @@ function Wait-LogMatch {
     Start-Sleep -Milliseconds 100
   }
   return $false
+}
+
+function Write-AcceptanceLogs {
+  param([string]$UserDataPath)
+  foreach ($logName in @('dsh_desktop.log', 'dsh_backend.log')) {
+    $logPath = Join-Path $UserDataPath $logName
+    if (Test-Path -LiteralPath $logPath) {
+      Write-Host "----- tail of $logName -----"
+      Get-Content -LiteralPath $logPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
+    } else {
+      Write-Host "----- missing $logName (app never wrote it) -----"
+    }
+  }
 }
 
 function Invoke-ElectronNode {
@@ -160,8 +194,7 @@ try {
     Start-Sleep -Milliseconds 500
     if ($desktop.Process.HasExited) { break }
     try {
-      $response = Invoke-WebRequest http://127.0.0.1:3080 -UseBasicParsing -TimeoutSec 1
-      if ($response.StatusCode -eq 200 -and $response.Content -match '<title>\s*DeepSeek Harness\s*</title>') {
+      if (Test-DshHttp $acceptanceUserData) {
         $ready = $true
         break
       }
@@ -175,19 +208,12 @@ try {
       Write-Host "----- desktop stderr -----`n$desktopStderr"
       Write-Host "desktop process exited with code $($desktop.Process.ExitCode) before HTTP readiness"
     }
-    foreach ($logName in @('dsh_desktop.log', 'dsh_backend.log')) {
-      $logPath = Join-Path $acceptanceUserData $logName
-      if (Test-Path -LiteralPath $logPath) {
-        Write-Host "----- tail of $logName -----"
-        Get-Content -LiteralPath $logPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
-      } else {
-        Write-Host "----- missing $logName (app never wrote it) -----"
-      }
-    }
+    Write-AcceptanceLogs $acceptanceUserData
     throw 'Installed runtime did not return the expected HTTP 200 page'
   }
   $coldHttpMs = $coldWatch.ElapsedMilliseconds
   if (!(Wait-LogMatch $desktopLog 0 'backend paint-ready' 15)) {
+    Write-AcceptanceLogs $acceptanceUserData
     throw 'Cold start reached HTTP 200 but not renderer paint-ready'
   }
   $coldPaintMs = $coldWatch.ElapsedMilliseconds

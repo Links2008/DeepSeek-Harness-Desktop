@@ -14,7 +14,11 @@ const verifier = fs.readFileSync(
 );
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-assert.match(workflow, /workflow_dispatch:/, "the release pipeline needs a forceable acceptance run");
+assert.match(workflow, /^name:\s*Validate DeepSeek Harness upstream/m,
+  "the read-only workflow must not imply that it publishes a Release");
+assert.doesNotMatch(workflow, /build-test-release:/,
+  "the job name must not imply a publish step that does not exist");
+assert.match(workflow, /workflow_dispatch:/, "the acceptance pipeline needs a forceable run");
 assert.match(workflow, /inputs\.force|inputs\.force|inputs:\s*[\s\S]*force:/);
 assert.match(workflow, /push:\s*[\s\S]*branches:\s*\[main\][\s\S]*paths:/, "desktop-shell pushes must run acceptance without a manual dispatch");
 const pushBlock = workflow.match(/push:\s*[\s\S]*?schedule:/)?.[0] || "";

@@ -60,10 +60,14 @@ assert.match(verifier, /Startup timing ms:[\s\S]*cold-http=[\s\S]*cold-paint=[\s
   "installed acceptance must report cold and persistent-daemon warm-start timing separately");
 assert.match(verifier, /persistent backend ready reused=true/,
   "warm acceptance must prove that the second shell reused the daemon");
+assert.match(verifier, /daemon-state\.json[\s\S]*serviceUrl/,
+  "installed HTTP acceptance must use the token-bearing URL from daemon state");
 assert.match(startupMeasure, /coldHttpMs[\s\S]*coldPaintMs[\s\S]*instantReopenMs[\s\S]*warmDaemonMs[\s\S]*warmPaintMs/,
   "packaged startup measurement must report separate cold and daemon-reuse milestones");
 assert.match(startupMeasure, /USERPROFILE[\s\S]*DSH_HOME[\s\S]*--user-data-dir/,
   "packaged startup measurement must isolate profile and Electron data");
+assert.match(startupMeasure, /daemon-state\.json[\s\S]*serviceUrl/,
+  "startup measurement must probe the authenticated daemon URL");
 assert.match(startupMeasure, /instantReopenMs\s*-gt\s*1000/,
   "the packaged shell must enforce its webpage-like one-second reopen budget");
 assert.match(verifier, /\.Process\.HasExited[\s\S]*desktop process exited/,

@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
-const { DaemonController, portOpen } = require("../runtime/daemon-controller.cjs");
+const { DaemonController, isDshBackend, portOpen } = require("../runtime/daemon-controller.cjs");
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -36,17 +36,33 @@ function pipeRequest(pipe, request) {
   fs.writeFileSync(fakeBackend, `
 const http = require("node:http");
 const port = Number(process.argv[2]);
-const server = http.createServer((_request, response) => {
+const token = "integration-secret";
+const server = http.createServer((request, response) => {
+  const requestUrl = new URL(request.url, "http://127.0.0.1:" + port);
+  if (requestUrl.searchParams.get("token") === token) {
+    response.writeHead(303, {
+      location: "/",
+      "set-cookie": "dsh-auth=accepted; HttpOnly; SameSite=Strict",
+    });
+    response.end();
+    return;
+  }
+  if (request.headers.cookie !== "dsh-auth=accepted") {
+    response.writeHead(401);
+    response.end("unauthorized");
+    return;
+  }
   response.writeHead(200, { "content-type": "text/html" });
   response.end("<title>DeepSeek Harness</title>");
 });
 server.listen(port, "127.0.0.1", () => {
-  process.stderr.write("dsh web: http://127.0.0.1:" + port + "\\n");
+  process.stdout.write("dsh web: http://127.0.0.1:" + port + "/?token=" + token + "\\n");
   process.stderr.write("[dsh-startup] compile cache flushed\\n");
 });
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
 `, "utf8");
 
+  const announcedUrls = [];
   const options = {
     execPath: process.execPath,
     appRoot: root,
@@ -54,6 +70,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     profileDir: path.join(temporary, "profile"),
     version: "test-1.0.0",
     port,
+    onPortOpen: (serviceUrl) => { announcedUrls.push(serviceUrl); },
   };
   const spec = {
     command: process.execPath,
@@ -77,6 +94,10 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     assert.equal(await portOpen(port), true);
 
     const state = controller.state();
+    assert.equal(state.serviceUrl, `http://127.0.0.1:${port}/?token=integration-secret`);
+    assert.equal(await isDshBackend(port), false, "the token-protected backend must reject the legacy bare URL");
+    assert.equal(await isDshBackend(state.serviceUrl), true);
+    assert.ok(announcedUrls.includes(state.serviceUrl), "the shell must receive the authenticated service URL");
     const denied = await pipeRequest(state.pipe, { token: "wrong", command: "status" });
     assert.equal(denied.error, "unauthorized");
     const status = await pipeRequest(state.pipe, { token: state.token, command: "status" });

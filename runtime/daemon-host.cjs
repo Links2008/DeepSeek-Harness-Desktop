@@ -24,6 +24,18 @@ const quarantineBrokenPlugin = createPluginQuarantine({ profileDir: config.profi
 let logBytes = 0;
 let logClosed = false;
 
+function serviceUrlFromAnnouncement(text) {
+  const match = text.match(/\bdsh web:\s*(http:\/\/\S+)/i);
+  if (!match) return null;
+  try {
+    const candidate = new URL(match[1]);
+    if (candidate.hostname !== "127.0.0.1" || Number(candidate.port) !== Number(config.port)) return null;
+    return candidate.toString();
+  } catch (_error) {
+    return null;
+  }
+}
+
 function writeState(next) {
   const state = {
     ...currentState,
@@ -105,6 +117,7 @@ function startBackend() {
   const attemptStartedAt = Date.now();
   let serviceAnnounced = false;
   let startupSettled = false;
+  let announcementTail = "";
   stderrTail = "";
   backend = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
@@ -117,9 +130,15 @@ function startBackend() {
     const text = chunk.toString();
     appendLog(label, chunk);
     if (label === "stderr") stderrTail = (stderrTail + text).slice(-65536);
-    if (!serviceAnnounced && /\bdsh web:\s*http/i.test(text)) {
+    announcementTail = (announcementTail + text).slice(-8192);
+    const serviceUrl = serviceUrlFromAnnouncement(announcementTail);
+    if (!serviceAnnounced && serviceUrl) {
       serviceAnnounced = true;
-      writeState({ status: startupSettled ? "ready" : "settling", serviceAnnouncedMs: Date.now() - attemptStartedAt });
+      writeState({
+        status: startupSettled ? "ready" : "settling",
+        serviceAnnouncedMs: Date.now() - attemptStartedAt,
+        serviceUrl,
+      });
     }
     if (!startupSettled && /\[dsh-startup\] compile cache flushed/.test(text)) {
       startupSettled = true;

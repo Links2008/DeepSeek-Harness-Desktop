@@ -75,7 +75,7 @@ function portOpen(port, timeout = 400) {
   });
 }
 
-function isDshBackend(port = 3080, timeout = 2000) {
+function isDshBackend(target = 3080, timeout = 2000) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (value) => {
@@ -83,16 +83,52 @@ function isDshBackend(port = 3080, timeout = 2000) {
       done = true;
       resolve(value);
     };
-    const request = http.get({ host: "127.0.0.1", port, path: "/" }, (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk) => { if (body.length < 65536) body += chunk; });
-      response.on("end", () => finish(
-        response.statusCode === 200 && /<title>\s*DeepSeek Harness\s*<\/title>/i.test(body),
-      ));
-    });
-    request.once("error", () => finish(false));
-    request.setTimeout(timeout, () => { request.destroy(); finish(false); });
+    let initialUrl;
+    try {
+      initialUrl = typeof target === "string"
+        ? new URL(target)
+        : new URL(`http://127.0.0.1:${target}/`);
+      if (initialUrl.protocol !== "http:" || initialUrl.hostname !== "127.0.0.1") return finish(false);
+    } catch (_error) {
+      return finish(false);
+    }
+    const origin = initialUrl.origin;
+    const deadline = Date.now() + timeout;
+    const visit = (candidate, cookie, redirectsLeft) => {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || candidate.origin !== origin) return finish(false);
+      const headers = cookie ? { cookie } : undefined;
+      const request = http.get({
+        host: candidate.hostname,
+        port: Number(candidate.port),
+        path: `${candidate.pathname}${candidate.search}`,
+        headers,
+      }, (response) => {
+        const location = response.headers.location;
+        if ([301, 302, 303, 307, 308].includes(response.statusCode) && location && redirectsLeft > 0) {
+          let next;
+          try { next = new URL(location, candidate); }
+          catch (_error) { response.resume(); finish(false); return; }
+          const setCookies = Array.isArray(response.headers["set-cookie"])
+            ? response.headers["set-cookie"]
+            : [response.headers["set-cookie"]].filter(Boolean);
+          const issuedCookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+          const nextCookie = [cookie, issuedCookie].filter(Boolean).join("; ");
+          response.once("end", () => visit(next, nextCookie, redirectsLeft - 1));
+          response.resume();
+          return;
+        }
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => { if (body.length < 65536) body += chunk; });
+        response.on("end", () => finish(
+          response.statusCode === 200 && /<title>\s*DeepSeek Harness\s*<\/title>/i.test(body),
+        ));
+      });
+      request.once("error", () => finish(false));
+      request.setTimeout(Math.max(1, remaining), () => { request.destroy(); finish(false); });
+    };
+    visit(initialUrl, "", 2);
   });
 }
 
@@ -135,9 +171,9 @@ class DaemonController {
     while (Date.now() - startedAt < timeoutMs) {
       const state = this.state();
       if (isReusableState(state, expected) && state.status === "ready" &&
-          processAlive(state.pid) && await isDshBackend(this.port, 500)) {
+          processAlive(state.pid) && await isDshBackend(state.serviceUrl || this.port, 500)) {
         this.log(`daemon ready after peer launch pid=${state.pid}`);
-        this.onPortOpen();
+        this.onPortOpen(state.serviceUrl || `http://127.0.0.1:${this.port}/`);
         return { ok: true, reused: true, state, elapsedMs: Date.now() - startedAt };
       }
       const owner = readJson(this.paths.lock);
@@ -152,16 +188,16 @@ class DaemonController {
     const expected = { version: this.version, port: this.port };
     let previous = this.state();
     if (isReusableState(previous, expected) && previous.status === "ready" &&
-        processAlive(previous.pid) && await isDshBackend(this.port)) {
+        processAlive(previous.pid) && await isDshBackend(previous.serviceUrl || this.port)) {
       this.log(`daemon ready reused pid=${previous.pid}`);
-      this.onPortOpen();
+      this.onPortOpen(previous.serviceUrl || `http://127.0.0.1:${this.port}/`);
       return { ok: true, reused: true, state: previous, elapsedMs: 0 };
     }
     if (await portOpen(this.port)) {
       const matchingDaemonStarting = isReusableState(previous, expected) && processAlive(previous.pid);
       if (!matchingDaemonStarting && await isDshBackend(this.port)) {
         this.log("compatible external Harness backend reused");
-        this.onPortOpen();
+        this.onPortOpen(`http://127.0.0.1:${this.port}/`);
         return { ok: true, reused: true, external: true, elapsedMs: 0 };
       }
       if (!matchingDaemonStarting) return { ok: false, reason: "port-occupied" };
@@ -174,9 +210,9 @@ class DaemonController {
     try {
       previous = this.state();
       if (isReusableState(previous, expected) && previous.status === "ready" &&
-          processAlive(previous.pid) && await isDshBackend(this.port)) {
+          processAlive(previous.pid) && await isDshBackend(previous.serviceUrl || this.port)) {
         this.log(`daemon ready reused after launch lock pid=${previous.pid}`);
-        this.onPortOpen();
+        this.onPortOpen(previous.serviceUrl || `http://127.0.0.1:${this.port}/`);
         return { ok: true, reused: true, state: previous, elapsedMs: 0 };
       }
     if (previous && processAlive(previous.pid)) {
@@ -209,15 +245,20 @@ class DaemonController {
     this.log(`daemon launched pid=${child.pid}`);
     const startedAt = Date.now();
     let portReported = false;
+    let navigationReported = false;
     while (Date.now() - startedAt < timeoutMs) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (!portReported && await portOpen(this.port, 100)) {
         portReported = true;
         this.log(`backend port-open after ${Date.now() - startedAt}ms`);
-        this.onPortOpen();
       }
       const state = this.state();
-      if (state?.status === "ready" && await isDshBackend(this.port, 500)) {
+      if (!navigationReported && state?.serviceUrl && await isDshBackend(state.serviceUrl, 500)) {
+        navigationReported = true;
+        this.onPortOpen(state.serviceUrl);
+      }
+      if (state?.status === "ready" && await isDshBackend(state.serviceUrl || this.port, 500)) {
+        if (!navigationReported) this.onPortOpen(state.serviceUrl || `http://127.0.0.1:${this.port}/`);
         this.log(`daemon HTTP ready after ${Date.now() - startedAt}ms`);
         return { ok: true, reused: false, state, elapsedMs: Date.now() - startedAt };
       }
