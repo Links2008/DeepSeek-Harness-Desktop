@@ -23,6 +23,8 @@ assert.match(script, /\.exe\.blockmap[\s\S]*latest\.yml/,
 assert.match(script, /SHA512[\s\S]*latest\.yml/i, "release metadata must match installer bytes");
 assert.match(script, /releases\?per_page=100[\s\S]*existingRelease[\s\S]*no files were overwritten/i,
   "reruns must verify an existing release without overwriting it");
+assert.match(script, /@\(\$releaseIndex\.tag_name\)\s*-contains\s*\$tag/,
+  "Windows PowerShell must inspect the top-level release array without nesting it");
 assert.match(script, /if \(\$existingRelease\)[\s\S]*return[\s\S]*Local tag \$tag does not point to HEAD/,
   "an already-published version must be verified before new-tag conflict checks");
 assert.match(script, /releases\/latest[\s\S]*latest\.tag_name/,

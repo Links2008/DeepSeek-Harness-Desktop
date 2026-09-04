@@ -102,9 +102,9 @@ try {
     throw 'Installer SHA512 does not match latest.yml'
   }
 
-  $releaseIndex = @(gh api "repos/$Repository/releases?per_page=100" | ConvertFrom-Json)
+  $releaseIndex = gh api "repos/$Repository/releases?per_page=100" | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing GitHub Releases' }
-  $existingRelease = @($releaseIndex | Where-Object tag_name -eq $tag).Count -gt 0
+  $existingRelease = @($releaseIndex.tag_name) -contains $tag
   $sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
   $expectedAssets = @{
     $installerName = (Get-Item -LiteralPath $installer).Length
