@@ -73,8 +73,11 @@ try {
     throw 'Installer SHA512 does not match latest.yml'
   }
 
-  gh release view $tag --repo $Repository *> $null
-  if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing to overwrite it" }
+  $releaseIndex = @(gh api "repos/$Repository/releases?per_page=100" | ConvertFrom-Json)
+  if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing GitHub Releases' }
+  if ($releaseIndex | Where-Object tag_name -eq $tag) {
+    throw "Release $tag already exists; refusing to overwrite it"
+  }
   $localTag = @(git tag --list $tag)
   if ($localTag.Count -gt 0 -and (git rev-list -n 1 $tag).Trim() -ne $head) {
     throw "Local tag $tag does not point to HEAD"
