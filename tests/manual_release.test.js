@@ -21,8 +21,12 @@ assert.match(script, /actions\/workflows\/upstream-sync\.yml\/runs[\s\S]*conclus
 assert.match(script, /\.exe\.blockmap[\s\S]*latest\.yml/,
   "differential update metadata must be published with the installer");
 assert.match(script, /SHA512[\s\S]*latest\.yml/i, "release metadata must match installer bytes");
-assert.match(script, /releases\?per_page=100[\s\S]*tag_name[\s\S]*refusing to overwrite/i,
-  "reruns must detect an existing public release without treating a missing release as an error");
+assert.match(script, /releases\?per_page=100[\s\S]*existingRelease[\s\S]*no files were overwritten/i,
+  "reruns must verify an existing release without overwriting it");
+assert.match(script, /releases\/latest[\s\S]*latest\.tag_name/,
+  "Latest verification must use stable REST API fields");
+assert.doesNotMatch(script, /isLatest/, "verification must not depend on a gh-version-specific field");
+assert.match(script, /\.digest[\s\S]*sha256:/i, "published installer digest must match the local artifact");
 assert.match(script, /release create[\s\S]*--verify-tag[\s\S]*--latest/,
   "the human release command must publish only an existing verified tag as Latest");
 assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)|contents:\s*write/i,
