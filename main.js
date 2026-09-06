@@ -587,8 +587,7 @@ async function injectDesktopTweaks() {
       width: min(calc(var(--dsh-chat-content-width) + 32px), calc(100% - 32px)) !important;
       max-width: 100% !important;
     }
-    /* v3.1.3-fix：去掉 Web UI 的 HARNESS 启动加载画面（HARNESS 字标 + 转圈，与桌面壳 loading.html 重复） */
-    div[class*="_boot_"] { display: none !important; }
+    /* Keep upstream boot content visible: the same container owns plugin-load errors. */
     /* v3.1.3-fix：去掉侧边栏「技能中心」条目 */
     button[data-dsh-skill-explorer-entry] { display: none !important; }
     /* v3.1.3-fix：删除「退出 DeepSeek Harness」悬浮按钮（退出键失灵，直接移除入口） */
