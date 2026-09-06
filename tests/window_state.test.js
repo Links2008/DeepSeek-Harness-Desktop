@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { loadWindowState, trackWindowState } = require('../runtime/window-state.cjs');
+const { loadWindowState, trackWindowState, restoreWindowBounds } = require('../runtime/window-state.cjs');
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-window-state-'));
 const file = path.join(temporary, 'bounds.json');
@@ -14,6 +14,18 @@ const screen = {
   getDisplayMatching: (bounds) => ({ workArea: bounds.x < 0 ? secondary : primary }),
 };
 try {
+  let measured;
+  let adjustments = 0;
+  const scaledWindow = {
+    setBounds: (bounds) => { adjustments += 1; measured = { ...bounds, width: bounds.width + 2, height: bounds.height + 1 }; },
+    getNormalBounds: () => measured,
+  };
+  const target = { x: 20, y: 20, width: 958, height: 648 };
+  restoreWindowBounds(scaledWindow, target);
+  assert.deepEqual(measured, target, 'DPI frame deltas must not accumulate on reopen');
+  assert.equal(adjustments, 2);
+  restoreWindowBounds(scaledWindow, { width: 1280, height: 860 });
+  assert.equal(adjustments, 2, 'unsaved default bounds are not moved');
   assert.deepEqual(loadWindowState(file, screen), { width: 1280, height: 728, maximized: false });
   fs.writeFileSync(file, '{invalid');
   assert.equal(loadWindowState(file, screen).width, 1280);

@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { createBackendSpec } = require("./runtime/backend-spec.cjs");
 const { DaemonController } = require("./runtime/daemon-controller.cjs");
-const { loadWindowState, trackWindowState } = require("./runtime/window-state.cjs");
+const { loadWindowState, trackWindowState, restoreWindowBounds } = require("./runtime/window-state.cjs");
 const { patchHarnessRuntime } = require("./scripts/patch-harness-runtime.cjs");
 const { prepareCompileCache } = require("./scripts/prepare-compile-cache.cjs");
 const { prepareDesktopProfile } = require('./scripts/prepare-desktop-profile.cjs');
@@ -1135,6 +1135,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  restoreWindowBounds(mainWindow, bounds);
   trackWindowState(mainWindow, boundsFile, (error) => log("window bounds save failed: " + error.message));
   if (maximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));

@@ -44,4 +44,21 @@ function trackWindowState(window, file, onError = () => {}) {
   window.on('closed', () => clearTimeout(timer));
 }
 
-module.exports = { loadWindowState, trackWindowState };
+function restoreWindowBounds(window, bounds) {
+  if (!validBounds(bounds)) return;
+  // Frameless Windows windows at fractional DPI can add non-client pixels even
+  // to setBounds. Correct the measured delta with a bounded rounding adjustment,
+  // rather than accumulating it
+  // every time the saved normal bounds are passed back to the constructor.
+  const requested = { ...bounds };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    window.setBounds(requested);
+    const actual = window.getNormalBounds();
+    if (['x', 'y', 'width', 'height'].every((key) => actual[key] === bounds[key])) return;
+    for (const key of ['x', 'y', 'width', 'height']) requested[key] += bounds[key] - actual[key];
+    requested.width = Math.max(320, requested.width);
+    requested.height = Math.max(240, requested.height);
+  }
+}
+
+module.exports = { loadWindowState, trackWindowState, restoreWindowBounds };
