@@ -114,7 +114,7 @@
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载 `DeepSeekHarness-Setup-4.0.2.exe`。
+2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.0.3`）。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
