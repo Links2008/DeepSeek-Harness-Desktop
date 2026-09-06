@@ -35,6 +35,12 @@ function pipeRequest(pipe, request) {
   const fakeBackend = path.join(temporary, "fake-backend.cjs");
   fs.writeFileSync(fakeBackend, `
 const http = require("node:http");
+const fs = require('node:fs');
+const manifest = JSON.parse(fs.readFileSync(process.argv[3]));
+if (manifest.dependencies['dsh-usage']) {
+  process.stderr.write("plugin tree failed to load: failed to apply loader entry include (cordis:include): failed to import loader entry dsh-usage (dsh-usage): Cannot find package '@deepseek-ai/schemastery'\\n");
+  process.exit(1);
+}
 const port = Number(process.argv[2]);
 const token = "integration-secret";
 const server = http.createServer((request, response) => {
@@ -74,11 +80,17 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
   };
   const spec = {
     command: process.execPath,
-    args: [fakeBackend, String(port)],
+    args: [fakeBackend, String(port), path.join(options.profileDir, 'package.json')],
     cwd: temporary,
     env: {},
     port,
   };
+
+  fs.mkdirSync(options.profileDir);
+  fs.writeFileSync(path.join(options.profileDir, 'package.json'), JSON.stringify({
+    dependencies: { 'dsh-usage': '1.0.0', healthy: '1.0.0' },
+    dsh: { profile: { bundles: ['dsh-usage', 'healthy'] } },
+  }));
 
   const controller = new DaemonController(options);
   try {
@@ -94,6 +106,9 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     assert.equal(await portOpen(port), true);
 
     const state = controller.state();
+    assert.equal(state.quarantines[0].packageName, 'dsh-usage');
+    assert.equal(fs.existsSync(state.quarantines[0].backupPath), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(options.profileDir, 'package.json'))).dependencies, { healthy: '1.0.0' });
     assert.equal(state.serviceUrl, `http://127.0.0.1:${port}/?token=integration-secret`);
     assert.equal(await isDshBackend(port), false, "the token-protected backend must reject the legacy bare URL");
     assert.equal(await isDshBackend(state.serviceUrl), true);

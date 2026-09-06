@@ -13,12 +13,14 @@ files:
   - package.json
   - scripts/patch-harness-runtime.cjs
   - scripts/prepare-compile-cache.cjs
+  - scripts/prepare-desktop-profile.cjs
   - scripts/prepare-profile-prebundles.cjs
   - scripts/prebundle-runtime-startup.cjs
   - runtime/backend-spec.cjs
   - runtime/daemon-controller.cjs
   - runtime/daemon-host.cjs
   - runtime/plugin-recovery.cjs
+  - runtime/window-state.cjs
 extraResources:
   - from: bundle/dsh-runtime/package.json
     to: dsh-runtime/package.json

@@ -5,6 +5,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { patchHarnessRuntime } = require("./patch-harness-runtime.cjs");
 const { prebundleRuntime } = require("./prebundle-runtime-startup.cjs");
+const { prepareDesktopProfile } = require('./prepare-desktop-profile.cjs');
 const electron = require("electron");
 
 const root = path.resolve(__dirname, "..");
@@ -41,6 +42,7 @@ async function main() {
   if (cacheFailure) throw new Error(cacheFailure);
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-cache-seed-home-"));
+  prepareDesktopProfile(home, runtimeRoot);
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(stage, { recursive: true });
   const port = await freePort();

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [switch]$Publish,
+  [switch]$UseValidatedArtifact,
   [string]$Repository = 'Links2008/DeepSeek-Harness-Desktop'
 )
 
@@ -63,7 +64,7 @@ try {
   $workflowRuns = gh api "repos/$Repository/actions/workflows/upstream-sync.yml/runs?head_sha=$head&status=completed&per_page=20" | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) { throw 'Could not verify the release validation workflow' }
   $successfulRun = @($workflowRuns.workflow_runs | Where-Object {
-    $_.head_sha -eq $head -and $_.conclusion -eq 'success'
+    $_.head_sha -eq $head -and $_.conclusion -eq 'success' -and $_.event -ne 'schedule'
   } | Select-Object -First 1)
   if ($successfulRun.Count -ne 1) {
     throw "Current HEAD $head has no successful Validate DeepSeek Harness upstream run"
@@ -73,9 +74,22 @@ try {
   $version = [string]$manifest.version
   $tag = "v$version"
   $notes = Join-Path $root "release-notes-v$version.md"
-  $installer = Join-Path $root "installer-dist\DeepSeekHarness-Setup-$version.exe"
-  $blockmap = Join-Path $root "installer-dist\DeepSeekHarness-Setup-$version.exe.blockmap"
-  $metadata = Join-Path $root 'installer-dist\latest.yml'
+  $artifactRoot = Join-Path $root 'installer-dist'
+  if ($UseValidatedArtifact) {
+    $downloadRoot = Join-Path $artifactRoot ("validated-$($successfulRun[0].id)-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    gh run download $successfulRun[0].id --repo $Repository --name "desktop-$version-$head" --dir $downloadRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Could not download the validated installer artifact' }
+    $validatedLock = Get-Content (Join-Path $downloadRoot 'upstream-lock.json') -Raw | ConvertFrom-Json
+    $sourceLock = Get-Content (Join-Path $root 'upstream-lock.json') -Raw | ConvertFrom-Json
+    $validatedPackage = Get-Content (Join-Path $downloadRoot 'package.json') -Raw | ConvertFrom-Json
+    if ($validatedPackage.version -ne $version -or $validatedLock.commit -ne $sourceLock.commit -or $validatedLock.version -ne $sourceLock.version) {
+      throw 'Validated artifact version or upstream revision does not match the source'
+    }
+    $artifactRoot = Join-Path $downloadRoot 'installer-dist'
+  }
+  $installer = Join-Path $artifactRoot "DeepSeekHarness-Setup-$version.exe"
+  $blockmap = Join-Path $artifactRoot "DeepSeekHarness-Setup-$version.exe.blockmap"
+  $metadata = Join-Path $artifactRoot 'latest.yml'
   foreach ($artifact in @($notes, $installer, $blockmap, $metadata)) {
     if (!(Test-Path -LiteralPath $artifact)) { throw "Required release file is missing: $artifact" }
   }
@@ -135,7 +149,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Could not push tag $tag" }
 
   $assets = @($installer, $blockmap, $metadata)
-  gh release create $tag @assets --repo $Repository --verify-tag --latest --title "DeepSeek Harness Desktop $tag - Architecture and release reliability update" --notes-file $notes
+  gh release create $tag @assets --repo $Repository --verify-tag --latest --title "DeepSeek Harness Desktop $tag" --notes-file $notes
   if ($LASTEXITCODE -ne 0) { throw "GitHub Release $tag was not created" }
 
   Assert-PublishedRelease $tag $login $installerName $expectedAssets $sha256

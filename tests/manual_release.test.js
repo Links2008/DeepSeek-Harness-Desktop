@@ -35,8 +35,8 @@ assert.match(script, /release create[\s\S]*--verify-tag[\s\S]*--latest/,
   "the human release command must publish only an existing verified tag as Latest");
 assert.doesNotMatch(workflow, /gh release (?:create|upload|edit)|contents:\s*write/i,
   "Actions must remain a read-only acceptance gate");
-assert.match(workflow, /github\.event_name[^\n]*schedule[\s\S]*\$lock\.branch[\s\S]*\$lock\.commit/,
-  "only scheduled monitoring may follow the moving upstream branch");
+assert.match(workflow, /github\.event_name[^\n]*schedule[\s\S]*resolve-upstream-release\.cjs[\s\S]*\$lock\.commit/,
+  "scheduled monitoring must follow published releases while release builds stay pinned");
 assert.match(workflow, /ref:\s*\$\{\{\s*steps\.upstream\.outputs\.ref\s*\}\}/,
   "release commits must build the exact runtime revision from upstream-lock.json");
 

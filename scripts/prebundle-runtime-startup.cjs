@@ -63,6 +63,13 @@ async function buildEntry(esbuild, spec) {
 
 async function prebundleRuntime() {
   const esbuild = require("esbuild");
+  // The upstream profile fallback walks the CLI's dependency closure, not every
+  // package present in node_modules. Register the desktop-shipped store there.
+  const cliManifestPath = path.join(packageRoot('@deepseek-ai/dsh'), 'package.json');
+  const cliManifest = JSON.parse(fs.readFileSync(cliManifestPath, 'utf8'));
+  const store = JSON.parse(fs.readFileSync(path.join(packageRoot('dshmarket'), 'package.json'), 'utf8'));
+  cliManifest.dependencies = { ...cliManifest.dependencies, dshmarket: store.version };
+  fs.writeFileSync(cliManifestPath, JSON.stringify(cliManifest, null, 2) + '\n', 'utf8');
   const piAiDir = packageRoot("@earendil-works/pi-ai");
   const piAiManifestPath = path.join(piAiDir, "package.json");
   const piAiManifest = JSON.parse(fs.readFileSync(piAiManifestPath, "utf8"));
@@ -79,6 +86,14 @@ async function prebundleRuntime() {
   }
   fs.writeFileSync(piAiManifestPath, JSON.stringify(piAiManifest, null, 2) + "\n", "utf8");
   const specs = [
+    {
+      name: 'undici', entry: 'index.js', outfile: 'index.dsh-prebundle.cjs', format: 'cjs',
+      patch(manifest, target) { manifest.main = target; },
+    },
+    {
+      name: 'dshmarket', entry: 'lib/index.js', outfile: 'lib/index.dsh-prebundle.js', format: 'esm',
+      patch(manifest, target) { manifest.main = target; manifest.exports['.'].default = target; },
+    },
     {
       name: "@earendil-works/pi-ai",
       entry: "dist/index.js",

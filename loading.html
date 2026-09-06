@@ -125,8 +125,16 @@
       <p data-detail>首次启动可能需要约一分钟</p>
     </div>
     <div class="spinner" aria-label="正在加载"></div>
+    <button data-diagnostics hidden type="button">打开诊断目录</button>
   </main>
   <script>
+    window.dshShowStartupFailure = (message) => {
+      document.querySelector('[data-status]').textContent = '后端启动失败';
+      document.querySelector('[data-detail]').textContent = message;
+      document.querySelector('.spinner').hidden = true;
+      document.querySelector('[data-diagnostics]').hidden = false;
+    };
+    document.querySelector('[data-diagnostics]').addEventListener('click', () => window.dshWin?.openDiagnostics());
     window.dshBeginStartupExit = () => {
       if (window.dshStartupExitPromise) return window.dshStartupExitPromise;
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

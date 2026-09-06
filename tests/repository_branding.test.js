@@ -21,7 +21,12 @@ assert.match(readme, /`master`/);
 assert.doesNotMatch(readme, /deepseek-ai\/deepseek-harness\/commit\/[0-9a-f]{40}/,
   "README must use upstream-lock.json instead of a commit that becomes stale on every sync");
 assert.match(readme, /Links2008/);
-assert.match(readme, /v4 是重大架构升级；v4\.0\.1 是首个稳定性更新/);
+assert.match(readme, /v4\.0\.2/);
+assert.match(readme, /内置插件商店/);
+assert.match(readme, /稳定性大幅提升/);
+assert.match(readme, /官方最新发布/);
+assert.match(readme, /badge\/deepseek-harness-desktop-15\.svg/);
+assert.match(readme, /badge\/install\/deepseek-harness-desktop-15\.svg/);
 assert.match(readme, /安装包轻量化/);
 assert.match(readme, /DSH-IM/);
 assert.match(builder, /repo:\s*DeepSeek-Harness-Desktop/);
@@ -35,8 +40,10 @@ assert.match(lock.commit, /^[0-9a-f]{40}$/,
 const releaseNotes = fs.readdirSync(root)
   .filter((name) => /^release-notes-.*\.md$/.test(name))
   .sort();
-assert.deepEqual(releaseNotes, ["release-notes-v4.0.1.md"],
-  "only the maintained v4 release notes should remain in the repository");
+const version = JSON.parse(read("package.json")).version;
+assert.ok(releaseNotes.includes(`release-notes-v${version}.md`),
+  "the current desktop version must have maintained release notes");
+assert.ok(releaseNotes.includes("release-notes-v4.0.1.md"), "keep historical release notes");
 
 for (const match of readme.matchAll(/\]\((?!https?:\/\/)([^)#]+)(?:#[^)]+)?\)/g)) {
   assert.equal(fs.existsSync(path.join(root, match[1])), true,

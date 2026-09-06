@@ -6,6 +6,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# NSIS uses the same product identity even when /D points to a temporary folder.
+# Refuse to replace/uninstall an existing user's application during acceptance.
+$existingInstall = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+  Where-Object { $_.DisplayName -like '*DeepSeekHarness*' -or $_.DisplayName -like '*DeepSeek Harness*' }
+if ($existingInstall) { throw 'An existing DeepSeek Harness installation was found; run installer acceptance on a clean runner or VM' }
+
 function Test-LocalPort {
   param([int]$Port)
   $client = [Net.Sockets.TcpClient]::new()

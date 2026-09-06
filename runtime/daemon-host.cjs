@@ -18,6 +18,7 @@ let stopping = false;
 let respawnCount = 0;
 let stderrTail = "";
 let currentState = {};
+const quarantines = [];
 const startedAt = Date.now();
 const logPath = path.join(path.dirname(config.statePath), "dsh_backend.log");
 const quarantineBrokenPlugin = createPluginQuarantine({ profileDir: config.profileDir, maxCount: 2 });
@@ -118,6 +119,7 @@ function startBackend() {
   let serviceAnnounced = false;
   let startupSettled = false;
   let announcementTail = "";
+  let spawnError = null;
   stderrTail = "";
   backend = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
@@ -147,25 +149,30 @@ function startBackend() {
   };
   backend.stdout?.on("data", observe("stdout"));
   backend.stderr?.on("data", observe("stderr"));
-  backend.once("error", (error) => appendLog("daemon", `spawn error: ${error.message}\n`));
-  backend.once("exit", (code) => {
+  backend.once("error", (error) => { spawnError = error.message; appendLog("daemon", `spawn error: ${error.message}\n`); });
+  backend.once("close", (code) => {
     backend = null;
     if (stopping) return;
     if (code !== 0 && respawnCount < MAX_RESPAWN) {
       respawnCount += 1;
       const delayMs = Math.pow(4, respawnCount - 1) * 1000;
       const quarantine = quarantineBrokenPlugin(stderrTail);
+      if (quarantine) {
+        quarantines.push(quarantine);
+        appendLog('recovery', `isolated ${quarantine.packageName}; profile backup: ${quarantine.backupPath}\n`);
+      }
       writeState({
         status: "restarting",
         exitCode: code,
         retryInMs: delayMs,
         stderrTail,
         quarantinedPlugin: quarantine?.packageName || null,
+        quarantines,
       });
       setTimeout(startBackend, delayMs);
       return;
     }
-    writeState({ status: "failed", exitCode: code, error: `backend exited ${code}`, stderrTail });
+    writeState({ status: "failed", exitCode: code, error: spawnError || `backend exited ${code}`, stderrTail, quarantines });
     server.close(() => process.exit(code || 1));
   });
 }

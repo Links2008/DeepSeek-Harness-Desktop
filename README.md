@@ -13,6 +13,8 @@
   <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases"><img src="https://img.shields.io/github/downloads/Links2008/DeepSeek-Harness-Desktop/total?style=flat-square" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&style=flat-square" alt="Windows 10 and 11">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-31c854?style=flat-square" alt="MIT License"></a>
+  <a href="https://www.dsh.so/artifact/deepseek-harness-desktop-15"><img src="https://www.dsh.so/badge/deepseek-harness-desktop-15.svg" alt="dsh.so 市场收录与风险检测状态"></a>
+  <a href="https://www.dsh.so/artifact/deepseek-harness-desktop-15"><img src="https://www.dsh.so/badge/install/deepseek-harness-desktop-15.svg" alt="dsh.so 安装检测状态"></a>
 </p>
 
 <p align="center">
@@ -24,7 +26,20 @@
 </p>
 
 > [!IMPORTANT]
-> **v4 是重大架构升级；v4.0.1 是首个稳定性更新。** 桌面端改为“轻量窗口壳 + 常驻用户级 daemon”：窗口关闭后任务和 Harness 后端继续运行，再次打开直接复用；同时由 Electron 直接承载 Node，显著缩小安装包。v4.0.1 进一步适配上游带随机 token 的本机 Web 地址，并修复长期失败的发布验收链路。v3 的配置、会话、凭据和插件目录继续保留。
+> **v4.0.2：多 IM 接入、内置插件商店，启动与恢复稳定性大幅提升。** 在 v4 的“轻量窗口壳 + 常驻用户级 daemon”架构上，修复第三方插件加载失败识别、窗口状态丢失和 Electron 原生模块 ABI 不匹配。内核跟随官方最新发布版本，通过验收后更新；本版使用 `0.1.3-alpha.1`（上游预发布）。已有配置、会话、凭据和插件继续保留。
+
+## v4.0.2 的重点改进
+
+- **支持各种主流 IM 连接**：通过 [DSH-IM](https://github.com/xmanrui/DSH-IM) 安装与配置，接入飞书、微信、钉钉、企业微信、QQ、Slack、Telegram、Discord、WhatsApp。各渠道的账号、凭据和平台权限需要自行配置；并非安装后已自动连接全部平台。
+- **内置插件商店**：新建桌面 profile 默认加载 `dshmarket`，可在应用内浏览、安装和管理社区插件。商店包随安装器提供，浏览目录和安装新插件需要联网；已有 profile 不会被覆盖，可通过其插件配置启用商店。
+- **启动与恢复稳定性大幅提升**：识别不带 `/dsh` 的插件入口及嵌套依赖加载错误，备份 profile 清单后隔离明确故障的第三方插件，重试恢复并显示诊断；不把核心模块错误当成可忽略的插件问题。
+- **窗口位置与尺寸记忆**：保存正常窗口边界和最大化状态，兼容多屏、显示器断开和损坏状态文件。
+- **可诊断的失败页**：显示实际启动错误并提供本机诊断目录入口，不再把所有失败都归为 150 秒超时。
+- **可验证的更新交付**：原生模块按 Electron ABI 重编译并实际加载检查，CI 验收成功后才上传安装制品，再由维护者人工账号发布。
+
+设置页仍使用上游官方通用设置、模型和插件能力。旧版 `/api/settings.describe` 等路径已不适用于当前 Typert 接口，不能以旧 URL 返回 404 或缺少旧 `client.js` 判断设置服务失效。无人值守多会话编排仍是功能提案，不在本版完成范围。
+
+顶部两个 **dsh.so 动态徽章**来自市场收录邮件，链接到实际条目，分别显示风险检测和安装检测状态；收录不等于人工安全认证，也不代表最新桌面版已重新通过该平台安装检测。
 
 ## 产品预览
 
@@ -64,7 +79,7 @@
 - 3080 端口开放后立即预加载主界面，插件树 settle 后再释放启动遮罩。
 - 非关键桌面注入后置，不再阻塞编辑器首屏；启动阶段仍保留可诊断时序。
 
-三次隔离解包态实测（毫秒，中位数 / 最差值）：完整冷启动 HTTP `3224 / 3231`，冷启动首屏 `4628 / 4736`，普通关窗后快捷方式重开 `141 / 143`，强制结束前台壳后复用 daemon `457 / 459`。全新安装后第一次首屏会受 Windows 新文件扫描影响，本机验收为 `31120 ms`；后续普通关窗重开不会再次支付这段成本。
+以下是 v4 架构升级时的历史基线，不代表 v4.0.2 新内核的性能承诺：三次隔离解包态实测（毫秒，中位数 / 最差值），完整冷启动 HTTP `3224 / 3231`，冷启动首屏 `4628 / 4736`，普通关窗后快捷方式重开 `141 / 143`，强制结束前台壳后复用 daemon `457 / 459`。全新安装后第一次首屏会受 Windows 新文件扫描影响，当时本机验收为 `31120 ms`。
 
 ### 3. 浅色 UI 与兼容模式
 
@@ -79,7 +94,7 @@
 - 单个第三方插件缺失构建产物时可隔离故障项，避免拖垮整个后端。
 - DSH-IM 等社区插件仍由用户 profile 管理，桌面安装包不把个人插件和配置写入公共制品。
 
-完整升级说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
+完整升级说明见 [v4.0.2 Release Notes](release-notes-v4.0.2.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
 
 ## 为什么选择桌面版
 
@@ -89,13 +104,15 @@
 | 原生 Windows 壳 | 单实例、系统通知、无边框窗口、快捷方式和完整卸载 |
 | 接近网页的重开速度 | 常驻 daemon、登录预热、compile cache 和主界面预加载共同缩短等待 |
 | 插件兼容 | 保留现有 profile，支持 DSH-IM、Aqua 与 Harness 插件生态 |
+| 内置插件商店 | 新 profile 开箱具备 dshmarket 入口，按需扩展社区插件 |
+| 多 IM 连接 | 通过 DSH-IM 配置企业协作和个人消息渠道 |
 | 更新可靠 | 下载、校验、退出进程树、静默覆盖安装和快捷方式恢复形成闭环 |
 | 隐私明确 | 公共仓库和安装包不包含 API Key、Cookie、凭据、会话或本机日志 |
 
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载 `DeepSeekHarness-Setup-4.0.1.exe`。
+2. 下载 `DeepSeekHarness-Setup-4.0.2.exe`。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -110,7 +127,15 @@
 
 GitHub Actions 仅以只读权限执行测试、归档、SHA-512、隔离安装、AppID、Harness 版本、HTTP 200、原生模块、端口释放和卸载验收，不提交代码或发布 Release。通过后由 `Links2008` 身份人工核对制品并发布为 Latest。
 
-维护者可在本机安装并登录 GitHub CLI 后运行 `npm run release:github`。该命令会在发布前校验账号不是 bot、工作树和 `origin/main` 一致、当前 HEAD 的只读 Actions 已成功、标签未被占用、EXE/blockmap/`latest.yml` 完整且 SHA-512 相符；任何一项不满足都会拒绝发布。提交和人工触发验收使用 `upstream-lock.json` 的固定 commit，只有每日定时兼容性监控跟踪上游 `master`。
+维护者可在本机安装并登录 GitHub CLI 后运行 `npm run release:github`。该命令会在发布前校验账号不是 bot、工作树和 `origin/main` 一致、当前 HEAD 的非定时 Actions 已成功、标签未被占用、EXE/blockmap/`latest.yml` 完整且 SHA-512 相符；任何一项不满足都会拒绝发布。建议直接发布该次 CI 已验收的制品：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 -UseValidatedArtifact -Publish
+```
+
+提交和人工触发验收使用 `upstream-lock.json` 的固定 commit。每日定时兼容性监控选取上游**官方最新发布**的 DSH 标签（含预发布、排除草稿），不追逐未发布的 `master` 提交。监控通过不等于自动安装或自动发布：维护者核对结果、更新锁文件并再次验收后，才发布新的桌面版本。这样既保持跟进，也避免把未经验证的上游变化直接推给用户。
+
+`verify-installed-runtime.ps1` 的安装/卸载测试只应在干净 CI runner 或虚拟机运行；检测到已有正式安装时会拒绝执行，避免测试清理影响实际安装及快捷方式。
 
 ## 上游与版本谱系
 
@@ -118,8 +143,9 @@ GitHub Actions 仅以只读权限执行测试、归档、SHA-512、隔离安装�
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面版本 | `4.0.1` |
-| Harness 版本 | 见 [`upstream-lock.json`](upstream-lock.json) |
+| 桌面版本 | `4.0.2` |
+| Harness 版本 | `0.1.3-alpha.1`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
+| 跟进策略 | 官方最新发布标签 → 兼容性验收 → 锁定并发布桌面更新 |
 | 上游分支 | `master` |
 | 锁定提交 | 见 [`upstream-lock.json`](upstream-lock.json) |
 | 状态文件 | [`upstream-lock.json`](upstream-lock.json) |

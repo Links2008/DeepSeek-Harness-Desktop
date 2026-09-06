@@ -1,4 +1,5 @@
 const path = require("node:path");
+const fs = require("node:fs");
 
 const modulesRoot = process.argv[2];
 if (!modulesRoot) throw new Error("usage: electron-node-runtime-probe.cjs <node_modules>");
@@ -14,6 +15,11 @@ const packages = {};
 for (const name of ["node-pty", "sharp", "koffi"]) {
   const loaded = require(path.join(modulesRoot, name));
   packages[name] = Object.keys(loaded).slice(0, 8);
+}
+if (fs.existsSync(path.join(modulesRoot, 'fs-ext'))) {
+  const nativeFs = require(path.join(modulesRoot, 'fs-ext'));
+  if (typeof nativeFs.flockSync !== 'function') throw new Error('fs-ext flockSync is unavailable');
+  packages['fs-ext'] = ['flockSync'];
 }
 
 process.stdout.write(`${JSON.stringify({

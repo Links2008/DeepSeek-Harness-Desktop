@@ -23,6 +23,7 @@ if (location.origin === "http://127.0.0.1:3080" && ipcRenderer.sendSync("startup
 }
 
 contextBridge.exposeInMainWorld("dshWin", {
+  openDiagnostics: () => ipcRenderer.invoke('startup:open-diagnostics'),
   min: (options) => ipcRenderer.send("win:min", options),
   max: (options) => ipcRenderer.send("win:max", options),
   close: (options) => ipcRenderer.send("win:close", options),

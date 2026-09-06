@@ -1,12 +1,15 @@
 // DeepSeek Harness Electron 桌面壳
-const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut, nativeTheme } = require("electron");
+const { app, BrowserWindow, WebContentsView, ipcMain, Notification, globalShortcut, nativeTheme, screen, shell } = require("electron");
+const { pathToFileURL } = require('node:url');
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { createBackendSpec } = require("./runtime/backend-spec.cjs");
 const { DaemonController } = require("./runtime/daemon-controller.cjs");
+const { loadWindowState, trackWindowState } = require("./runtime/window-state.cjs");
 const { patchHarnessRuntime } = require("./scripts/patch-harness-runtime.cjs");
 const { prepareCompileCache } = require("./scripts/prepare-compile-cache.cjs");
+const { prepareDesktopProfile } = require('./scripts/prepare-desktop-profile.cjs');
 const { prepareProfilePrebundles } = require("./scripts/prepare-profile-prebundles.cjs");
 const {
   APP_ID,
@@ -16,6 +19,7 @@ const {
 } = require("./desktop-behavior");
 
 const DEV_DSH_DIR = "D:\\deepseek-harness";
+const dshHome = () => process.env.DSH_HOME ? path.resolve(process.env.DSH_HOME) : path.join(app.getPath('home'), '.dsh');
 const URL = "http://127.0.0.1:3080";
 const APP_BG = "#121214";
 const CONTROL_COLLAPSED_X = 4;
@@ -58,6 +62,7 @@ let startupEntryArmed = false;
 let backendPagePreparedResolve = null;
 let backendNavigationPromise = null;
 let backendServiceUrl = URL;
+let backendFailure = '未能启动后端，请打开诊断目录查看 dsh_backend.log。';
 let autoUpdater = null;
 let updateState = { status: "idle", current: app.getVersion() };
 const recentCompletionKeys = new Map();
@@ -109,7 +114,7 @@ function configureLoginPrewarm() {
 // 之后所有设置写入（主题切换等）超时回滚。启动时检测锁内 PID，若已死亡则清理。
 function healOrphanedSettingsLock() {
   try {
-    const lockPath = path.join(app.getPath("home"), ".dsh", "settings.yaml.lock");
+    const lockPath = path.join(dshHome(), "settings.yaml.lock");
     if (!fs.existsSync(lockPath)) return;
     const pid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
     if (!Number.isFinite(pid) || pid <= 0) {
@@ -223,7 +228,7 @@ function persistentDaemon() {
       execPath: process.execPath,
       appRoot: __dirname,
       userData: app.getPath("userData"),
-      profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
+      profileDir: path.join(dshHome(), "profiles", "web"),
       version: app.getVersion(),
       port: 3080,
       log,
@@ -240,9 +245,10 @@ async function ensurePersistentBackend() {
     beforeLaunch: async () => {
       healOrphanedSettingsLock();
       if (!backend.cwd) return;
+      prepareDesktopProfile(dshHome(), backend.cwd);
       try {
         const prepared = await prepareProfilePrebundles({
-          profileDir: path.join(app.getPath("home"), ".dsh", "profiles", "web"),
+          profileDir: path.join(dshHome(), "profiles", "web"),
           runtimeRoot: backend.cwd,
           stateDir: app.getPath("userData"),
           onLog: log,
@@ -253,8 +259,20 @@ async function ensurePersistentBackend() {
       }
     },
   });
-  if (!result.ok) log("daemon backend failed: " + result.reason);
+  if (!result.ok) {
+    log("daemon backend failed: " + result.reason);
+    backendFailure = result.reason === 'port-occupied'
+      ? '本机 3080 端口被其他程序占用，请查看诊断日志。'
+      : `后端启动失败（${result.reason}）。自动恢复未完成，请查看 dsh_backend.log；原有数据已保留。`;
+  }
   else {
+    if (result.state?.quarantines?.length) {
+      const names = result.state.quarantines.map((item) => item.packageName).join(', ');
+      log('recovered startup after isolating plugins: ' + names);
+      if (!isDaemonPrewarm && !result.reused && Notification.isSupported()) {
+        new Notification({ title: 'DeepSeek Harness 已恢复启动', body: `已隔离故障插件：${names}。备份位置见 dsh_backend.log。` }).show();
+      }
+    }
     backendReadyAt = Date.now();
     log(`persistent backend ready reused=${Boolean(result.reused)} elapsed=${result.elapsedMs || 0}ms`);
   }
@@ -278,7 +296,7 @@ function profileDigest(file) {
   }
 }
 function watchProfileChanges() {
-  const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+  const profileDir = path.join(dshHome(), "profiles", "web");
   const queueReload = (why) => {
     if (!backendReadyAt) {
       log("profile change before backend ready ignored (" + why + ")");
@@ -847,7 +865,7 @@ async function createControlsOverlay() {
 // 不一致，从凭据恢复 deepseek-official provider 占位配置。
 function reconcileProviders() {
   try {
-    const dshDir = path.join(app.getPath("home"), ".dsh");
+    const dshDir = dshHome();
     const settingsPath = path.join(dshDir, "settings.yaml");
     const credentialsPath = path.join(dshDir, ".credentials.yaml");
     if (!fs.existsSync(settingsPath) || !fs.existsSync(credentialsPath)) return;
@@ -878,7 +896,7 @@ function applyRuntimePatches() {
   if (!app.isPackaged) return;
   try {
     const runtimeRoot = path.join(process.resourcesPath, "dsh-runtime");
-    const profileDir = path.join(app.getPath("home"), ".dsh", "profiles", "web");
+    const profileDir = path.join(dshHome(), "profiles", "web");
     const changed = patchHarnessRuntime(runtimeRoot, profileDir, {
       onFailure: (message) => log("runtime compatibility " + message),
     });
@@ -965,7 +983,7 @@ function layoutStartupOverlay() {
 
 function createStartupOverlay() {
   startupView = new WebContentsView({
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
   });
   startupView.setBackgroundColor("#00000000");
   mainWindow.contentView.addChildView(startupView);
@@ -1052,6 +1070,11 @@ function startBackendNavigation(serviceUrl = backendServiceUrl) {
   return navigation;
 }
 
+ipcMain.handle('startup:open-diagnostics', (event) => {
+  if (event.sender !== startupWebContents() || event.sender.getURL() !== pathToFileURL(path.join(__dirname, 'loading.html')).href) return false;
+  return shell.openPath(app.getPath('userData'));
+});
+
 async function transitionToBackend() {
   if (!await startBackendNavigation() || !mainWindow || mainWindow.isDestroyed()) return;
   revealBackendEntry();
@@ -1095,9 +1118,10 @@ async function revealBackendEntry() {
 }
 
 function createWindow() {
+  const boundsFile = path.join(app.getPath("userData"), "window-bounds.json");
+  const { maximized, ...bounds } = loadWindowState(boundsFile, screen);
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    ...bounds,
     title: "DeepSeek Harness",
     frame: false,
     transparent: false,
@@ -1111,6 +1135,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  trackWindowState(mainWindow, boundsFile, (error) => log("window bounds save failed: " + error.message));
+  if (maximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, "loading.html")).catch((e) => log("loading page error: " + e.message));
   createStartupOverlay();
   createControlsOverlay().catch((e) => log("controls overlay error: " + e.message));
@@ -1316,9 +1342,7 @@ if (hasSingleInstanceLock) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         const loadingContents = startupWebContents();
         if (loadingContents) loadingContents.executeJavaScript(`
-          document.querySelector('[data-status]').textContent = '启动失败，请关闭后重试';
-          document.querySelector('[data-detail]').textContent = 'DeepSeek Harness 后端未能在 150 秒内启动。';
-          document.querySelector('.spinner').hidden = true;
+          window.dshShowStartupFailure(${JSON.stringify(backendFailure)});
         `).catch(() => {});
       }
       return;

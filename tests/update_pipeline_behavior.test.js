@@ -22,7 +22,9 @@ assert.match(workflow, /workflow_dispatch:/, "the acceptance pipeline needs a fo
 assert.match(workflow, /inputs\.force|inputs\.force|inputs:\s*[\s\S]*force:/);
 assert.match(workflow, /push:\s*[\s\S]*branches:\s*\[main\][\s\S]*paths:/, "desktop-shell pushes must run acceptance without a manual dispatch");
 const pushBlock = workflow.match(/push:\s*[\s\S]*?schedule:/)?.[0] || "";
-assert.doesNotMatch(pushBlock, /package(?:-lock)?\.json|upstream-lock\.json/, "manual release-state commits must not retrigger packaging");
+assert.match(pushBlock, /package(?:-lock)?\.json[\s\S]*upstream-lock\.json/, "version and runtime lock changes require acceptance before human publishing");
+assert.match(workflow, /Verify archive and installed runtime[\s\S]*actions\/upload-artifact@v7/, "only accepted artifacts should be uploaded for release");
+assert.match(packageJson.scripts['prebuild:installer'], /rebuild-runtime-native\.cjs[\s\S]*prewarm-node-compile-cache\.cjs/, "Electron ABI rebuilding must precede runtime startup");
 assert.match(workflow, /release-policy\.cjs/, "release decisions must use the tested state machine");
 assert.match(workflow, /release\.outputs\.bump[\s\S]*npm version patch --no-git-tag-version/, "repair runs must reuse the existing version");
 assert.match(workflow, /PSNativeCommandUseErrorActionPreference\s*=\s*\$true/, "native build failures must stop the workflow immediately");
