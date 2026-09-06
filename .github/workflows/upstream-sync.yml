@@ -60,8 +60,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $lock = Get-Content upstream-lock.json -Raw | ConvertFrom-Json
-          $ref = if ('${{ github.event_name }}' -eq 'schedule') { node scripts/resolve-upstream-release.cjs } else { $lock.commit }
-          if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the published upstream release' }
+          $ref = $lock.commit
+          if ('${{ github.event_name }}' -eq 'schedule') {
+            $ref = node scripts/resolve-upstream-release.cjs
+            if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the published upstream release' }
+          }
           if (!$ref) { throw 'upstream-lock.json does not define the required revision' }
           "ref=$ref" >> $env:GITHUB_OUTPUT
 

@@ -13,6 +13,19 @@ const verifier = fs.readFileSync(
   "utf8",
 );
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+// A fresh PowerShell step has no native exit code when push uses the pinned SHA.
+// Execute that branch, rather than relying only on YAML/source-shape assertions.
+if (process.platform === 'win32') {
+  const resolveStep = workflow.match(/name: Resolve upstream revision[\s\S]*?run: \|\r?\n([\s\S]*?)\r?\n      - name:/)[1]
+    .replace(/^          /gm, '')
+    .replace(/\$\{\{ github\.event_name \}\}/g, 'push')
+    .replace('"ref=$ref" >> $env:GITHUB_OUTPUT', 'Write-Output $ref');
+  const check = require('node:child_process').spawnSync('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command', '$LASTEXITCODE = $null; ' + resolveStep,
+  ], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  assert.equal(check.status, 0, `pinned revision resolution failed: ${check.stderr}`);
+  assert.ok(check.stdout.includes(JSON.parse(fs.readFileSync(path.join(root, 'upstream-lock.json'))).commit));
+}
 
 assert.match(workflow, /^name:\s*Validate DeepSeek Harness upstream/m,
   "the read-only workflow must not imply that it publishes a Release");
