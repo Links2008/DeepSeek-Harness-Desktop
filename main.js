@@ -287,6 +287,11 @@ async function ensurePersistentBackend() {
 let pluginReloadTimer = null;
 let lastPluginReloadAt = 0;
 let backendReadyAt = 0;
+// v4.0.4-fix：用户最近一次交互时间戳（渲染层 pointerdown/keydown/wheel/input 上报）。
+// 插件清单变化触发的 webContents.reload() 会丢弃正在进行的交互并吞掉点击，用户侧
+// 表现为"新建会话反复失败"。重载必须等到用户空闲 RELOAD_IDLE_MS 之后才提交。
+let lastUserActivityAt = 0;
+const RELOAD_IDLE_MS = 8000;
 const profileDigests = new Map();
 function profileDigest(file) {
   try {
@@ -309,10 +314,18 @@ function watchProfileChanges() {
     }
     log("profile change detected (" + why + "), reload queued");
     if (pluginReloadTimer) clearTimeout(pluginReloadTimer);
-    pluginReloadTimer = setTimeout(() => {
+    const commitReload = () => {
       pluginReloadTimer = null;
       if (Date.now() - lastPluginReloadAt < 15000) {
         log("plugin reload skipped: rate limited");
+        return;
+      }
+      // v4.0.4-fix：用户正在操作时绝不重载。最多每 5s 复查一次，直到用户空闲
+      // RELOAD_IDLE_MS；期间任何新交互都会继续顺延，避免 reload 吞掉点击。
+      const idleFor = Date.now() - lastUserActivityAt;
+      if (lastUserActivityAt && idleFor < RELOAD_IDLE_MS) {
+        log("plugin reload deferred for user activity (" + (RELOAD_IDLE_MS - idleFor) + "ms left)");
+        pluginReloadTimer = setTimeout(commitReload, Math.min(RELOAD_IDLE_MS - idleFor, 5000));
         return;
       }
       // v3.1.1：重载前重放运行时补丁（含聚合入口去重）——插件/商店更新可能
@@ -324,7 +337,8 @@ function watchProfileChanges() {
         log("reloading web UI after plugin change");
         mainWindow.webContents.reload();
       }
-    }, 5000);
+    };
+    pluginReloadTimer = setTimeout(commitReload, 5000);
   };
   try {
     ["package.json", "cordis.patch.yml"].forEach((name) => {
@@ -541,11 +555,74 @@ async function injectWindowChrome() {
       // click 事件，但选择器太宽泛可能匹配错误按钮，导致正常退出被阻止。
       // 普通关闭由主窗口隐藏保活；Ctrl+Q 与安装更新负责显式退出。
 
+      // v4.0.4-fix：恢复"退出"入口。移除旧实现后，设置面板里原生的"退出"按钮
+      // 失去 IPC 通路（mainWindow.on('close') 被吞掉并 hide()），点击毫无反应。
+      // 这里 (1) 旁路绑定原生退出按钮，(2) 在底部操作栏补一个 shell 自有的退出
+      // 按钮，二者都走 win:quit。与旧实现的关键差异：选择器精确到文案、绝不使用
+      // stopImmediatePropagation，避免再次吞掉其它按钮的正常点击。
+      function bindQuitButton() {
+        if (!window.dshWin || !window.dshWin.quit) return;
+        if (!window.__dshQuitBound) {
+          window.__dshQuitBound = true;
+          document.addEventListener('click', function (event) {
+            var node = event.target;
+            var native = node && node.closest ? node.closest('button, [role="button"], a') : null;
+            if (!native || native.dataset.dshQuitEntry !== undefined) return;
+            var label = ((native.getAttribute('aria-label') || '') + ' ' + (native.textContent || '')).trim();
+            if (/退出登录|注销|sign\s?out|log\s?out/i.test(label)) return;
+            var exact = /^(退出|退出应用|退出\s*deepseek\s*harness|quit|exit)$/i.test(label);
+            var prefixed = /^退出/.test(label);
+            if (!exact && !prefixed) return;
+            window.dshWin.quit();
+          }, true);
+        }
+        var button = document.querySelector('button[data-dsh-quit-entry]');
+        if (!button) {
+          var row = document.querySelector('[data-dsh-update-row]') || document.querySelector('[data-dsh-entry-row]');
+          if (!row) return;
+          button = document.createElement('button');
+          button.type = 'button';
+          button.dataset.dshQuitEntry = '';
+          button.setAttribute('aria-label', '退出');
+          button.title = '退出 DeepSeek Harness';
+          button.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>';
+          row.appendChild(button);
+        }
+        if (button && !button.__dshQuitBound) {
+          button.__dshQuitBound = true;
+          button.addEventListener('click', function (event) {
+            event.preventDefault();
+            window.dshWin.quit();
+          });
+        }
+      }
+
+      // v4.0.4-fix：用户交互心跳。插件清单变化触发的 reload 会吞掉正在进行的
+      // 交互（新建会话点不动/设置失灵的根因）。把 pointerdown/keydown 等以 1s
+      // 节流上报给主进程，供 commitReload 在用户空闲前持续顺延重载。
+      function bindActivityReporter() {
+        if (!window.dshWin || !window.dshWin.activity) return;
+        if (window.__dshActivityBound) return;
+        window.__dshActivityBound = true;
+        var lastSent = 0;
+        var report = function () {
+          var now = Date.now();
+          if (now - lastSent < 1000) return;
+          lastSent = now;
+          window.dshWin.activity();
+        };
+        ['pointerdown', 'keydown', 'wheel', 'input', 'focusin'].forEach(function (type) {
+          window.addEventListener(type, report, { capture: true, passive: true });
+        });
+      }
+
       function ensureChrome() {
         if (!document.body) return;
         document.querySelector('.dsh-drag-region')?.remove();
         bindSidebarTracker();
         bindUpdateButton();
+        bindQuitButton();
+        bindActivityReporter();
         bindNativeDragRegion();
       }
       ensureChrome();
@@ -932,15 +1009,22 @@ function stopControlsMotion() {
 }
 
 function setControlsX(nextX) {
-  if (!controlsView || controlsView.webContents.isDestroyed() || nextX === controlsX) return;
-  controlsX = nextX;
+  if (!controlsView || controlsView.webContents.isDestroyed()) return;
+  const rounded = Math.round(nextX);
+  if (rounded === controlsX) return;
+  controlsX = rounded;
   controlsView.setBounds({ x: controlsX, y: CONTROL_Y, width: 48, height: 18 });
 }
 
 function animateControlsTo(expanded, reducedMotion) {
   const targetX = expanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X;
   stopControlsMotion();
-  if (reducedMotion || targetX === controlsX) {
+  // v4.0.4-fix：卡顿治理。逐帧 setBounds 对 WebContentsView 是全量重排+重合成，
+  // 窗口不可见/最小化时离屏动画毫无收益，恢复可见时又叠加残余帧造成抖动；此时直接
+  // 落到目标位置。位置以时间为基准推进且自增，保证不出现回跳，避免视觉抖动。
+  const visible = Boolean(mainWindow && !mainWindow.isDestroyed()
+    && mainWindow.isVisible() && !mainWindow.isMinimized());
+  if (reducedMotion || !visible || targetX === controlsX) {
     setControlsX(targetX);
     return;
   }
@@ -1019,7 +1103,7 @@ async function waitForBackendPaint() {
           return element.tagName === 'TEXTAREA' || element.isContentEditable
             || /消息|message|智能体/i.test(label);
         }));
-        const ready = textLength > 40 && buttonCount >= 3 && hasEditor;
+        const ready = hasEditor || (textLength > 40 && buttonCount >= 3);
         const timedOut = performance.now() >= deadline;
         if (ready || timedOut) {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve({
@@ -1152,6 +1236,15 @@ function createWindow() {
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
   mainWindow.on("resize", layoutStartupOverlay);
+  // v4.0.4-fix：隐藏/最小化时立即终止控件动画并落到最终位置，避免恢复可见时
+  // 继续播放离屏残余帧造成卡顿。
+  mainWindow.on("hide", () => {
+    stopControlsMotion();
+    if (controlsView && !controlsView.webContents.isDestroyed()) {
+      setControlsX(lastExpanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X);
+    }
+  });
+  mainWindow.on("minimize", () => stopControlsMotion());
   mainWindow.on("close", (event) => {
     if (isQuitting || installInFlight) return;
     event.preventDefault();
@@ -1231,6 +1324,23 @@ ipcMain.on("win:max", () => {
   mainWindow[command]();
 });
 ipcMain.on("win:close", () => mainWindow && mainWindow.close());
+// v4.0.4-fix：补回显式退出通道。v3.1.2 移除 bindQuitButton 后，设置面板的
+// "退出"按钮没有任何 IPC 可达路径（mainWindow.on("close") 会被吞掉并 hide()），
+// 点击因此毫无反应。这里提供真正的退出：标记 isQuitting 阻断 close 拦截与后端
+// respawn，然后 app.quit()。与 Ctrl+Q / before-quit 走同一条退出语义。
+ipcMain.on("win:quit", (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  log("explicit quit requested from renderer");
+  isQuitting = true;
+  app.quit();
+});
+// v4.0.4-fix：渲染层用户交互心跳。插件清单变化触发的 reload 会吞掉正在进行
+// 的点击，用户侧表现为"新建会话反复失败"。这里记录最近交互时间，供 commitReload
+// 在用户空闲前持续顺延重载。
+ipcMain.on("win:activity", (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  lastUserActivityAt = Date.now();
+});
 ipcMain.handle("app:get-update-state", () => updateState);
 ipcMain.handle("app:check-update", async (event) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return updateState;
