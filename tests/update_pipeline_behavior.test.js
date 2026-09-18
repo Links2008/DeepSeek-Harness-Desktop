@@ -20,9 +20,13 @@ if (process.platform === 'win32') {
     .replace(/^          /gm, '')
     .replace(/\$\{\{ github\.event_name \}\}/g, 'push')
     .replace('"ref=$ref" >> $env:GITHUB_OUTPUT', 'Write-Output $ref');
+  // The spawned step only reads the pinned SHA, but a cold Windows CI runner
+  // can spend a long time merely starting PowerShell; a tight timeout would
+  // surface as status === null (a flake) instead of a real resolution failure.
   const check = require('node:child_process').spawnSync('powershell', [
     '-NoProfile', '-NonInteractive', '-Command', '$LASTEXITCODE = $null; ' + resolveStep,
-  ], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  ], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 60000 });
+  assert.notEqual(check.status, null, 'pinned revision resolution timed out before completing');
   assert.equal(check.status, 0, `pinned revision resolution failed: ${check.stderr}`);
   assert.ok(check.stdout.includes(JSON.parse(fs.readFileSync(path.join(root, 'upstream-lock.json'))).commit));
 }
