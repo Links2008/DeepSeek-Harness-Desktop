@@ -58,7 +58,7 @@ win:
       arch:
         - x64
   icon: deepseek_whale_hermes_rounded.ico
-electronVersion: 43.4.0
+electronVersion: 43.0.0
 electronLanguages:
   - en-US
   - zh-CN
