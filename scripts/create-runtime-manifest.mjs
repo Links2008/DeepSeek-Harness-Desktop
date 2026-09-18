@@ -41,7 +41,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       packages.set(manifest.name, { manifest, tarball })
     }
   }
-  const selected = resolveLocalClosure(packages, ['@deepseek-ai/dsh'])
+  // Computer Use ships as two sibling packages that nothing else depends on, so
+  // they must be explicit closure roots or the runtime never ships them.
+  const selected = resolveLocalClosure(packages, [
+    '@deepseek-ai/dsh',
+    '@deepseek-ai/dsh-computer-use',
+    '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native',
+  ])
   const dependencies = Object.fromEntries(
     [...selected].sort().map(name => [name, pathToFileURL(packages.get(name).tarball).href]),
   )

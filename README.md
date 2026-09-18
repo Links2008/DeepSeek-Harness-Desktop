@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载 v4</strong></a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载 v4.2</strong></a>
   · <a href="#v4-重大升级">重大升级</a>
   · <a href="#为什么选择桌面版">软件优点</a>
   · <a href="#从源码构建">源码构建</a>
@@ -26,10 +26,17 @@
 </p>
 
 > [!IMPORTANT]
+> **v4.2 修复“打不开新对话”，默认启用 Computer Use，内核升级到 0.1.6-alpha.2**：修正预设中独占服务挂载被拒导致新建会话失败的问题，随安装包默认提供 Computer Use 能力，并把 Harness 内核升级到官方最新预发布版本。详见 [v4.2 更新说明](release-notes-v4.2.0.md)。
 > **v4.0.4 修复新建会话卡顿、设置退出入口与窗口控件动画**：修正插件重载与用户操作抢跑导致的“新建会话反复失败”，恢复设置面板的“退出”按钮，并消除窗口控件在隐藏/最小化后的残余动画抖动。详见 [v4.0.4 修复说明](release-notes-v4.0.4.md)。
 > **v4.0.3 修复启动黑屏的错误展示问题**：旧版桌面样式误隐藏了上游插件失败提示，现在保留该诊断区域。若旧社区插件仍使用失效 SDK，需先升级或适配插件；后台 HTTP 200 不代表主页可用。详见 [v4.0.3 修复说明](release-notes-v4.0.3.md)。
 >
 > **v4.0.2：多 IM 接入、内置插件商店，启动与恢复稳定性大幅提升。** 在 v4 的“轻量窗口壳 + 常驻用户级 daemon”架构上，修复第三方插件加载失败识别、窗口状态丢失和 Electron 原生模块 ABI 不匹配。内核跟随官方最新发布版本，通过验收后更新；本版使用 `0.1.3-alpha.1`（上游预发布）。已有配置、会话、凭据和插件继续保留。
+
+## v4.2 的重点改进
+
+- **新建会话可用性**：上游 0.1.6 的 Computer Use 独占服务行在预设里会发布进程级全局服务，直接挂载会被预设校验拒绝并使新建会话失败；桌面版把它放进带隔离域的 `cordis:group`，恢复新建会话与对话回复。
+- **Computer Use 默认启用**：随安装包提供官方 Computer Use 服务与 Cua Driver 原生提供方，无需手动安装即可在受支持场景下驱动本机应用。
+- **内核跟进官方最新预发布**：Harness runtime 升级到 `dsh-v0.1.6-alpha.2`（见 [`upstream-lock.json`](upstream-lock.json)），启动补丁与预设适配同步到新内核结构。
 
 ## v4.0.2 的重点改进
 
@@ -115,7 +122,7 @@
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.0.4`）。
+2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.2.0`）。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -146,8 +153,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面版本 | `4.0.2` |
-| Harness 版本 | `0.1.3-alpha.1`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
+| 桌面版本 | `4.2.0` |
+| Harness 版本 | `0.1.6-alpha.2`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
 | 跟进策略 | 官方最新发布标签 → 兼容性验收 → 锁定并发布桌面更新 |
 | 上游分支 | `master` |
 | 锁定提交 | 见 [`upstream-lock.json`](upstream-lock.json) |

@@ -1,7 +1,7 @@
 {
   "repository": "deepseek-ai/deepseek-harness",
   "branch": "master",
-  "tag": "dsh-v0.1.3-alpha.1",
-  "commit": "d347e703908d0406b7a7ef80e3a0e594d86b2215",
-  "version": "0.1.3-alpha.1"
+  "tag": "dsh-v0.1.6-alpha.2",
+  "commit": "ddefc45fbc7f8e46dd73185e68295696d1297887",
+  "version": "0.1.6-alpha.2"
 }

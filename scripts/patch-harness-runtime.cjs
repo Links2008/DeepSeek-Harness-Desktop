@@ -33,7 +33,14 @@ function patchTheme(source) {
 \t\t\t\t\tthis.adopt();
 \t\t\t\t});
 \t\t\t}`, "theme write ordering");
-  return replaceOnce(source, "\t\t\t\tif (section === void 0 || this.preference === section.preference) return;", "\t\t\t\tif (section === void 0 || this.preference === section.preference) return;\n\t\t\t\tif (this.pendingPreference !== void 0 && section.preference !== this.pendingPreference) return;", "theme stale adoption");
+  const staleAdoptionGuard = "\t\t\t\tif (this.pendingPreference !== void 0 && section.preference !== this.pendingPreference) return;";
+  if (source.includes(staleAdoptionGuard)) return source;
+  // 0.1.6 restructured adopt(): the preference comparison now also covers
+  // fontSize, so the single-line guard shipped for 0.1.3 no longer exists.
+  const currentStaleAnchor = "\t\t\t\tif (section === void 0) return;\n\t\t\t\tif (this.preference === section.preference && this.fontSize === section.fontSize) return;";
+  if (source.includes(currentStaleAnchor)) return source.replace(currentStaleAnchor, `${currentStaleAnchor}\n${staleAdoptionGuard}`);
+  const legacyStaleAnchor = "\t\t\t\tif (section === void 0 || this.preference === section.preference) return;";
+  return replaceOnce(source, legacyStaleAnchor, `${legacyStaleAnchor}\n${staleAdoptionGuard}`, "theme stale adoption");
 }
 
 function patchCompaction(source) {
@@ -79,8 +86,23 @@ function patchAquaSlotKey(source) {
 }
 function patchMinimalPreset(source) {
   if (/^\s*- id: compaction\s*$/m.test(source)) return source;
-  source = source.replace("Context compaction is absent.", "Context compaction is mounted internally without changing the two-tool model surface.");
+  // 0.1.6 把预设迁到 `@deepseek-ai/dsh-agent-presets`，头部注释被重新折行，
+  // 结论句现跨两行，故同时兼容旧的单行与新的折行两种锚点。
+  if (source.includes("Context compaction is absent.")) {
+    source = source.replace("Context compaction is absent.", "Context compaction is mounted internally without changing the two-tool model surface.");
+  } else if (source.includes("Context compaction is\n# absent.")) {
+    source = source.replace("Context compaction is\n# absent.", "Context compaction is mounted internally\n# without changing the two-tool model surface.");
+  }
   return `${source.trimEnd()}\n\n# Internal context maintenance; these rows do not add model-facing tools.\n- id: compaction\n  name: cordis:group\n  group: true\n  isolate:\n    compaction: true\n    toolResultPruner: true\n  config:\n    - id: compaction-basic\n      name: '@deepseek-ai/dsh-compaction-basic'\n\n    - id: command-compact\n      name: '@deepseek-ai/dsh-command-compact'\n\n    - id: tool-result-pruner\n      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'\n      config:\n        thresholdChars: 8192\n        headChars: 4096\n        tailChars: 1024\n`;
+}
+
+// 官方 0.1.6-alpha 引入 Computer Use（默认关闭）。桌面版把它作为默认能力随
+// 内置 standard 预设发布：exclusive 的 computerUse 服务行必须放进带 isolate
+// realm 的 cordis:group，否则 dsh-agent-presets 会以"发布进程级全局服务"为由
+// 拒绝挂载（这正是"开不了新对话"的根因）。幂等：目标 preset 已有该行时跳过。
+function patchStandardPreset(source) {
+  if (/- id:\s*computer-use\b/.test(source)) return source;
+  return `${source.trimEnd()}\n\n# Computer Use (official v0.1.6-alpha, off upstream by default): the exclusive\n# computerUse service plus the in-process Cua Driver native provider. The\n# service row MUST sit inside a group carrying an isolate realm, or\n# dsh-agent-presets rejects the mount for publishing a process-global service.\n- id: computer-use\n  name: cordis:group\n  group: true\n  isolate:\n    computerUse: true\n  config:\n    - id: computer-use-service\n      name: '@deepseek-ai/dsh-computer-use'\n\n    - id: computer-use-cua-driver-native\n      name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'\n`;
 }
 
 function patchStartupDiagnostics(source) {
@@ -90,22 +112,38 @@ function patchStartupDiagnostics(source) {
   if (!source.includes("[dsh-startup] profile begin")) {
     const syncCompose = "\tconst composed = composeProfile(options.profile, options.patchFiles);";
     const asyncCompose = "\tconst composed = await composeProfile(options.profile, options.patchFiles);";
-    const composeLine = source.includes(asyncCompose) ? asyncCompose : syncCompose;
-    const before = `async function runProfile(options) {\n${composeLine}`;
-    const after = `async function runProfile(options) {
+    const legacyCompose = source.includes(asyncCompose) ? asyncCompose : source.includes(syncCompose) ? syncCompose : null;
+    // 0.1.6 把 composeProfile 移入 try 块，签名扩为五参（profile / patchFiles /
+    // resolutionMode / fromDefaultProfile / resolvedProfile），函数首行不再紧邻
+    // compose，故另提供"就地插入"锚点：插在 compose 调用行之前（同一 try 作用域内，
+    // 后续 boot-resolved 标记与 fiber 监听都在该作用域内，闭包可见）。
+    const currentCompose = "\t\tconst composed = await composeProfile(options.profile, options.patchFiles, resolutionMode, options.fromDefaultProfile, options.resolvedProfile);";
+    if (legacyCompose !== null) {
+      const before = `async function runProfile(options) {\n${legacyCompose}`;
+      const after = `async function runProfile(options) {
 \tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;
 \tif (startupDiagnosticsStartedAt) process.stderr.write("[dsh-startup] profile begin after 0ms\\n");
-${composeLine}
+${legacyCompose}
 \tif (startupDiagnosticsStartedAt) process.stderr.write(\`[dsh-startup] profile composed after \${Date.now() - startupDiagnosticsStartedAt}ms\\n\`);`;
-    source = replaceOnce(source, before, after, "startup diagnostics phases");
+      source = replaceOnce(source, before, after, "startup diagnostics phases");
+    } else if (source.includes(currentCompose)) {
+      const after = `\t\tconst startupDiagnosticsStartedAt = process.env.DSH_STARTUP_DIAGNOSTICS ? Date.now() : 0;
+\t\tif (startupDiagnosticsStartedAt) process.stderr.write("[dsh-startup] profile begin after 0ms\\n");
+${currentCompose}
+\t\tif (startupDiagnosticsStartedAt) process.stderr.write(\`[dsh-startup] profile composed after \${Date.now() - startupDiagnosticsStartedAt}ms\\n\`);`;
+      source = replaceOnce(source, currentCompose, after, "startup diagnostics phases");
+    } else {
+      throw new Error("startup diagnostics phases: upstream anchor changed");
+    }
     source = replaceOnce(source, "\tapp.current = ctx;",
       "\tif (startupDiagnosticsStartedAt) process.stderr.write(`[dsh-startup] profile boot-resolved after ${Date.now() - startupDiagnosticsStartedAt}ms\\n`);\n\tapp.current = ctx;",
       "startup diagnostics boot resolution");
   }
   if (source.includes("[dsh-startup] fiber ")) return source;
-  const before = "\t\tapp.current = hostCtx;\n\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);";
-  const after = `\t\tapp.current = hostCtx;
-\t\tif (startupDiagnosticsStartedAt) hostCtx.on("internal/status", (fiber) => {
+  // 0.1.6 在 app.current = hostCtx 与 launch-environment 注入之间插入了
+  // profileContext 注入，两行不再相邻，故直接锚到 provide 调用本身。
+  const before = "\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);";
+  const after = `\t\tif (startupDiagnosticsStartedAt) hostCtx.on("internal/status", (fiber) => {
 \t\t\tif (fiber.state !== 2 && fiber.state !== 3) return;
 \t\t\ttry {
 \t\t\t\tconst state = fiber.state === 2 ? "active" : "failed";
@@ -228,7 +266,10 @@ function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
   apply("theme", path.join(modules, "@deepseek-ai", "dsh-client-ui-theme", "lib", "client.js"), patchTheme);
   apply("compaction", path.join(modules, "@deepseek-ai", "dsh-compaction-basic", "lib", "index.js"), patchCompaction);
   apply("conversation", path.join(modules, "@deepseek-ai", "dsh-client-ui-conversation", "lib", "client.js"), patchConversation);
-  apply("minimal-compaction", path.join(modules, "@deepseek-ai", "dsh", "config", "agent-presets", "minimal", "agent.cordis.yml"), patchMinimalPreset);
+  // 0.1.6 起预设由 `@deepseek-ai/dsh-agent-presets` 提供（旧 `@deepseek-ai/dsh/config/agent-presets` 已移除）。
+  const presets = path.join(modules, "@deepseek-ai", "dsh-agent-presets", "presets");
+  apply("minimal-compaction", path.join(presets, "minimal", "agent.cordis.yml"), patchMinimalPreset);
+  apply("standard-computer-use", path.join(presets, "standard", "agent.cordis.yml"), patchStandardPreset);
   const dshLib = path.join(modules, "@deepseek-ai", "dsh", "lib");
   if (fs.existsSync(dshLib)) {
     for (const name of fs.readdirSync(dshLib).filter((entry) => /^profile-boot-.+\.js$/.test(entry))) {
@@ -262,4 +303,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchStartupDiagnostics, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };
+module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchStandardPreset, patchStartupDiagnostics, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };

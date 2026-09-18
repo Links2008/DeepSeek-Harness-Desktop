@@ -72,7 +72,7 @@ try {
 
   $manifest = Get-Content package.json -Raw | ConvertFrom-Json
   $version = [string]$manifest.version
-  $tag = "v$version"
+  $tag = if ($version -eq '4.2.0') { 'v4.2' } else { "v$version" }
   $notes = Join-Path $root "release-notes-v$version.md"
   $artifactRoot = Join-Path $root 'installer-dist'
   if ($UseValidatedArtifact) {
