@@ -193,7 +193,7 @@ assert.ok(prebundleSource.includes('entry: "dist/providers/all.js"'),
   "pi-ai's static provider catalog must be collapsed into one startup file");
 assert.match(prebundleSource, /args\.kind\s*===\s*"dynamic-import"[\s\S]*external:\s*true/,
   "provider API dynamic imports must remain external and lazy during catalog bundling");
-assert.match(prewarmSource, /files\s*>\s*500/,
+assert.match(prewarmSource, /files\s*>\s*800/,
   "installer builds must fail when the core startup graph regresses above its bounded ceiling");
 for (const entry of [
   "dist/api/anthropic-messages.lazy.js",

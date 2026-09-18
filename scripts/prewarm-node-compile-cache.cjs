@@ -86,7 +86,11 @@ async function main() {
 
     const files = countFiles(stage);
     if (files < 100) throw new Error(`cache prewarm produced only ${files} files`);
-    if (files > 500) {
+    // v4.2 enables Computer Use by default, so its closure roots join the seeded
+    // startup surface. The legitimately larger set (624 files vs the pre-0.1.6
+    // ~429) raised this ceiling while keeping a guard against a lazy boundary
+    // genuinely exploding the startup closure.
+    if (files > 800) {
       throw new Error(`cache prewarm regressed to ${files} files; startup bundles likely crossed a lazy boundary`);
     }
     fs.rmSync(seed, { recursive: true, force: true });
