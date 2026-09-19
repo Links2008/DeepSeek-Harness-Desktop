@@ -25,10 +25,8 @@
   · <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/issues">问题反馈</a>
 </p>
 
-> [!IMPORTANT]
-> **v4.2 修复“打不开新对话”，默认启用 Computer Use，内核升级到 0.1.6-alpha.2**：修正预设中独占服务挂载被拒导致新建会话失败的问题，随安装包默认提供 Computer Use 能力，并把 Harness 内核升级到官方最新预发布版本。详见 [v4.2 更新说明](release-notes-v4.2.0.md)。
-> **v4.0.4 修复新建会话卡顿、设置退出入口与窗口控件动画**：修正插件重载与用户操作抢跑导致的“新建会话反复失败”，恢复设置面板的“退出”按钮，并消除窗口控件在隐藏/最小化后的残余动画抖动。详见 [v4.0.4 修复说明](release-notes-v4.0.4.md)。
-> **v4.0.3 修复启动黑屏的错误展示问题**：旧版桌面样式误隐藏了上游插件失败提示，现在保留该诊断区域。若旧社区插件仍使用失效 SDK，需先升级或适配插件；后台 HTTP 200 不代表主页可用。详见 [v4.0.3 修复说明](release-notes-v4.0.3.md)。
+> [!TIP]
+> **如果这个项目对你有帮助，欢迎[点个 Star 支持一下](https://github.com/Links2008/DeepSeek-Harness-Desktop)——制作不易，你的 Star 是持续维护的最大动力。**
 
 ## v4.2 的重点改进
 
