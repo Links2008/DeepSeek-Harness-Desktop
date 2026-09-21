@@ -25,7 +25,6 @@ const APP_BG = "#121214";
 const CONTROL_COLLAPSED_X = 4;
 const CONTROL_EXPANDED_X = 23;
 const CONTROL_Y = 3;
-const CONTROL_MOTION_MS = 160;
 let daemonController = null;
 // 更新/退出状态。更新时杀后端会触发 exit→respawn 恶性循环
 // （后端重启→运行时重新锁住安装目录→NSIS 无法替换文件→"无法关闭"死循环），
@@ -56,7 +55,6 @@ let mainWindow = null;
 let controlsView = null;
 let startupView = null;
 let controlsX = CONTROL_COLLAPSED_X;
-let controlsMotionTimer = null;
 let lastExpanded = null;
 let startupEntryArmed = false;
 let backendPagePreparedResolve = null;
@@ -369,14 +367,10 @@ async function injectWindowChrome() {
       --ds-ease-in-out: cubic-bezier(.4, 0, .2, 1);
     }
     .dsh-native-drag-region { -webkit-app-region: drag; }
-    .dsh-native-drag-region button,
-    .dsh-native-drag-region a,
-    .dsh-native-drag-region input,
-    .dsh-native-drag-region textarea,
-    .dsh-native-drag-region select,
-    .dsh-native-drag-region [role="button"],
-    .dsh-native-drag-region [role="tab"],
-    .dsh-native-drag-region [tabindex] { -webkit-app-region: no-drag; }
+    .dsh-native-drag-region :where(button, a, input, textarea, select, [role="button"], [role="tab"], [tabindex]),
+    .dsh-native-drag-region :where(button, a, input, textarea, select, [role="button"], [role="tab"], [tabindex]) * {
+      -webkit-app-region: no-drag;
+    }
     /* v4：侧栏底部壳层入口统一为 36px 圆形幽灵按钮。 */
     [data-dsh-entry-row] { display: flex !important; align-items: center !important; gap: 2px !important; }
     [data-dsh-entry-row] > button {
@@ -422,12 +416,12 @@ async function injectWindowChrome() {
         window.__dshSidebarTarget = sidebar;
         window.__dshSidebarFrame = frame;
         var lastExpanded = window.__dshSidebarExpanded;
+        var pendingTimer = null;
         var report = function (width) {
           width = Math.round(width * 10) / 10;
-          // v2.2.1-r5：滞回+消抖。better-sidebar 接管侧栏后宽度在 168px 阈值附近
+          // 滞回+同一事件循环消抖。better-sidebar 接管侧栏后宽度在 168px 阈值附近
           // 抖动，壳层窗口控件位置（23px<->4px）来回弹跳。滞回带 [152,184]：
-          // 越过上沿算展开、跌破下沿算收起，带内保持原状态；变化延迟 250ms 确认。
-          var pendingTimer = null;
+          // 越过上沿算展开、跌破下沿算收起，带内保持原状态。
           var next = width > 184 ? true : width < 152 ? false : lastExpanded;
           if (next === lastExpanded) {
             if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
@@ -443,7 +437,7 @@ async function injectWindowChrome() {
               expanded: next,
               reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
             });
-          }, 250);
+          }, 0);
         };
         var reportMeasured = function () { report(sidebar.getBoundingClientRect().width); };
         var reportTarget = function () {
@@ -531,17 +525,20 @@ async function injectWindowChrome() {
       }
 
       function bindNativeDragRegion() {
-        var action = Array.from(document.querySelectorAll('button')).find(function (button) {
-          var label = (button.getAttribute('aria-label') || '') + ' ' + (button.textContent || '');
-          return /总结导出|Session log|会话层级/.test(label);
-        });
-        var header = action && action.closest('header');
+        var header = document.querySelector('[data-slot="conversation.session.header"] > header');
         if (!header) {
           header = Array.from(document.querySelectorAll('header')).find(function (candidate) {
             return candidate.querySelector('button') && candidate.querySelector('[role="tablist"], [role="tab"]');
           });
         }
-        if (!header || header === window.__dshNativeDragTarget) return;
+        if (!header) {
+          if (!window.__dshNativeDragMissingLogged) {
+            window.__dshNativeDragMissingLogged = true;
+            console.warn('[dsh-desktop] conversation header not found; native drag disabled');
+          }
+          return;
+        }
+        if (header === window.__dshNativeDragTarget) return;
         if (window.__dshNativeDragTarget) window.__dshNativeDragTarget.classList.remove('dsh-native-drag-region');
         header.classList.add('dsh-native-drag-region');
         header.addEventListener('dblclick', function (event) {
@@ -1003,41 +1000,12 @@ function saveControlState(expanded) {
   }
 }
 
-function stopControlsMotion() {
-  if (controlsMotionTimer) clearInterval(controlsMotionTimer);
-  controlsMotionTimer = null;
-}
-
 function setControlsX(nextX) {
   if (!controlsView || controlsView.webContents.isDestroyed()) return;
   const rounded = Math.round(nextX);
   if (rounded === controlsX) return;
   controlsX = rounded;
   controlsView.setBounds({ x: controlsX, y: CONTROL_Y, width: 48, height: 18 });
-}
-
-function animateControlsTo(expanded, reducedMotion) {
-  const targetX = expanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X;
-  stopControlsMotion();
-  // v4.0.4-fix：卡顿治理。逐帧 setBounds 对 WebContentsView 是全量重排+重合成，
-  // 窗口不可见/最小化时离屏动画毫无收益，恢复可见时又叠加残余帧造成抖动；此时直接
-  // 落到目标位置。位置以时间为基准推进且自增，保证不出现回跳，避免视觉抖动。
-  const visible = Boolean(mainWindow && !mainWindow.isDestroyed()
-    && mainWindow.isVisible() && !mainWindow.isMinimized());
-  if (reducedMotion || !visible || targetX === controlsX) {
-    setControlsX(targetX);
-    return;
-  }
-  const startX = controlsX;
-  const startedAt = Date.now();
-  const tick = () => {
-    const progress = Math.min(1, (Date.now() - startedAt) / CONTROL_MOTION_MS);
-    const eased = 1 - Math.pow(1 - progress, 3);
-    setControlsX(Math.round(startX + (targetX - startX) * eased));
-    if (progress === 1) stopControlsMotion();
-  };
-  controlsMotionTimer = setInterval(tick, 16);
-  tick();
 }
 
 ipcMain.on("win:sidebar-state", (event, details) => {
@@ -1049,7 +1017,7 @@ ipcMain.on("win:sidebar-state", (event, details) => {
   if (details.expanded === lastExpanded) return;
   lastExpanded = details.expanded;
   saveControlState(details.expanded);
-  animateControlsTo(details.expanded, Boolean(details.reducedMotion));
+  setControlsX(details.expanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X);
 });
 
 function updateMaximizedChrome(maximized) {
@@ -1236,15 +1204,6 @@ function createWindow() {
   mainWindow.on("maximize", () => updateMaximizedChrome(true));
   mainWindow.on("unmaximize", () => updateMaximizedChrome(false));
   mainWindow.on("resize", layoutStartupOverlay);
-  // v4.0.4-fix：隐藏/最小化时立即终止控件动画并落到最终位置，避免恢复可见时
-  // 继续播放离屏残余帧造成卡顿。
-  mainWindow.on("hide", () => {
-    stopControlsMotion();
-    if (controlsView && !controlsView.webContents.isDestroyed()) {
-      setControlsX(lastExpanded ? CONTROL_EXPANDED_X : CONTROL_COLLAPSED_X);
-    }
-  });
-  mainWindow.on("minimize", () => stopControlsMotion());
   mainWindow.on("close", (event) => {
     if (isQuitting || installInFlight) return;
     event.preventDefault();
@@ -1252,7 +1211,6 @@ function createWindow() {
     log("window hidden for instant reopen");
   });
   mainWindow.on("closed", () => {
-    stopControlsMotion();
     mainWindow = null;
     controlsView = null;
     startupView = null;

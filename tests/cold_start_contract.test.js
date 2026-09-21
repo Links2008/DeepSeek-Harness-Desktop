@@ -161,6 +161,24 @@ assert.match(main, /prepareProfilePrebundles/,
   "desktop startup must prepare profile prebundles before spawning the backend");
 assert.equal(typeof patcher.patchStartupDiagnostics, "function",
   "runtime startup diagnostics must be independently regression-testable");
+const currentTheme = [
+  "\t\t\trevision = 0;",
+  "\t\t\tsnapshot;",
+  "\t\t\tsetTheme(id) {",
+  "\t\t\t\tif (id !== \"system\" && !this.themes.some((t) => t.id === id)) throw new Error(`theme \"${id}\" is not registered`);",
+  "\t\t\t\tif (this.preference === id) return;",
+  "\t\t\t\tthis.preference = id;",
+  "\t\t\t\tif (isThemePreference(id)) this.host.set(THEME_PREFERENCE_FIELD, id);",
+  "\t\t\t\tthis.publish();",
+  "\t\t\t}",
+  "\t\t\t\tif (section === void 0) return;",
+  "\t\t\t\tif (this.preference === section.preference && this.fontSize === section.fontSize) return;",
+].join("\n");
+const patchedTheme = patcher.patchTheme(currentTheme);
+assert.match(patchedTheme, /pendingPreference !== void 0 && section\.preference !== this\.pendingPreference/,
+  "the 0.1.6 adopt form must reject stale persisted theme preferences");
+assert.equal(patcher.patchTheme(patchedTheme), patchedTheme,
+  "the 0.1.6 theme patch must be idempotent");
 const diagnosedProfileBoot = patcher.patchStartupDiagnostics(`
 async function runProfile(options) {
 \tconst composed = await composeProfile(options.profile, options.patchFiles);

@@ -39,9 +39,10 @@ assert.match(preload, /onUpdateState/);
 
 assert.match(main, /CONTROL_Y\s*=\s*3/, "the three controls should sit 3px lower");
 assert.match(main, /y:\s*CONTROL_Y,\s*width:\s*48,\s*height:\s*18/);
-assert.match(main, /animateControlsTo/);
-assert.match(main, /CONTROL_MOTION_MS\s*=\s*160/);
-assert.match(main, /setInterval\([\s\S]*?,\s*16\)/, "native view motion should be driven in main at frame cadence");
+assert.doesNotMatch(main, /animateControlsTo|CONTROL_MOTION_MS|controlsMotionTimer/,
+  "sidebar changes must not animate a WebContentsView through repeated native relayouts");
+assert.doesNotMatch(main, /setInterval\([\s\S]*?,\s*16\)/,
+  "native controls must move once per settled sidebar state");
 assert.match(main, /typeof details\.expanded !== ["']boolean["']/);
 assert.match(preload, /sidebarState/);
 assert.doesNotMatch(preload, /sidebarFrame/);

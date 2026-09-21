@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "main.js"), "utf8");
@@ -91,5 +92,61 @@ assert.match(workflow, /verify-installed-runtime\.ps1/);
 assert.match(verifier, /StatusCode\s+-eq\s+200/, "installed acceptance must require HTTP 200");
 assert.doesNotMatch(workflow, /github-actions\[bot\]|git push|gh release (?:create|upload|edit)/i,
   "upstream tracking must validate without submitting as a bot");
+
+const sidebarTracker = main.match(/function bindSidebarTracker\(\) \{([\s\S]*?)\r?\n      \}\r?\n\r?\n      function updateLabelFor/);
+assert.ok(sidebarTracker, "sidebar tracker must remain extractable for its runtime contract");
+let resizeCallback;
+let mutationCallback;
+let nextTimer = 0;
+const timers = new Map();
+const sidebarReports = [];
+const sidebar = { isConnected: true, getBoundingClientRect: () => ({ width: 200 }) };
+const frame = { isConnected: true, firstElementChild: sidebar, style: { gridTemplateColumns: "200px" } };
+const sidebarContext = {
+  window: { dshWin: { sidebarState: (state) => sidebarReports.push(state) }, __dshSidebarExpanded: true },
+  document: { querySelectorAll: () => [frame] },
+  ResizeObserver: function (callback) { resizeCallback = callback; this.observe = () => {}; this.disconnect = () => {}; },
+  MutationObserver: function (callback) { mutationCallback = callback; this.observe = () => {}; this.disconnect = () => {}; },
+  setTimeout: (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; },
+  clearTimeout: (id) => timers.delete(id),
+  matchMedia: () => ({ matches: false }),
+};
+vm.runInNewContext(`function bindSidebarTracker() {${sidebarTracker[1]}\n}\nbindSidebarTracker();`, sidebarContext);
+assert.equal(typeof resizeCallback, "function");
+assert.equal(typeof mutationCallback, "function");
+frame.style.gridTemplateColumns = "140px";
+mutationCallback();
+mutationCallback();
+mutationCallback();
+assert.equal(timers.size, 1, "rapid sidebar frames must leave only one pending state commit");
+for (const callback of timers.values()) callback();
+assert.equal(sidebarReports.length, 1);
+assert.equal(sidebarReports[0].expanded, false);
+assert.equal(sidebarReports[0].reducedMotion, false);
+assert.doesNotMatch(main, /animateControlsTo|CONTROL_MOTION_MS|controlsMotionTimer/,
+  "the main process must not relayout the controls view every 16ms during sidebar motion");
+assert.match(main, /saveControlState\(details\.expanded\);\s*setControlsX\(details\.expanded\s*\?\s*CONTROL_EXPANDED_X\s*:\s*CONTROL_COLLAPSED_X\);/,
+  "a settled sidebar state must move the native controls exactly once");
+
+const dragBinder = main.match(/function bindNativeDragRegion\(\) \{([\s\S]*?)\r?\n      \}\r?\n\r?\n      \/\/ v3\.1\.2-fix/);
+assert.ok(dragBinder, "native drag binder must remain extractable for its runtime contract");
+const dragClasses = new Set();
+const dragHeader = {
+  classList: { add: (name) => dragClasses.add(name), remove: (name) => dragClasses.delete(name) },
+  addEventListener: () => {},
+};
+const dragContext = {
+  window: { dshWin: { max: () => {} } },
+  document: {
+    querySelector: (selector) => selector === '[data-slot="conversation.session.header"] > header' ? dragHeader : null,
+    querySelectorAll: () => [],
+  },
+  console: { warn: () => {} },
+};
+vm.runInNewContext(`function bindNativeDragRegion() {${dragBinder[1]}\n}\nbindNativeDragRegion();`, dragContext);
+assert.equal(dragClasses.has("dsh-native-drag-region"), true,
+  "the stable conversation-header slot must become the native drag region");
+assert.match(main, /\.dsh-native-drag-region :where\([\s\S]*button[\s\S]*\),\s*\.dsh-native-drag-region :where\([\s\S]*\) \*[\s\S]*-webkit-app-region:\s*no-drag/,
+  "interactive controls and their SVG descendants inside the drag region must remain clickable");
 
 console.log("window chrome and update configuration verified");

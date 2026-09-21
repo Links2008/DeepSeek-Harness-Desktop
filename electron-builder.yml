@@ -21,6 +21,7 @@ files:
   - runtime/daemon-host.cjs
   - runtime/plugin-recovery.cjs
   - runtime/window-state.cjs
+  - "!node_modules/**/*.map"
 extraResources:
   - from: bundle/dsh-runtime/package.json
     to: dsh-runtime/package.json
@@ -42,8 +43,6 @@ extraResources:
       - "!**/__tests__/**"
       - "!**/fixture/**"
       - "!**/fixtures/**"
-      - "!**/doc/**"
-      - "!**/docs/**"
       - "!**/example/**"
       - "!**/examples/**"
       - "!**/*.md"

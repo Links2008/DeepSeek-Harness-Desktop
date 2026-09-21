@@ -37,6 +37,10 @@ for (const locale of ["en-US", "zh-CN", "zh-TW"]) {
 for (const exclusion of ["*.pdb", "*.d.ts", "*.d.mts", "win32-arm64", "win10-arm64", "fixtures", "*.md"]) {
   assert.ok(builder.includes(exclusion), `runtime filter must exclude ${exclusion}`);
 }
+assert.ok(builder.includes('!node_modules/**/*.map'),
+  "the desktop app archive must omit production dependency source maps");
+assert.doesNotMatch(builder, /!\*\*\/docs?\/\*\*/,
+  "generic doc-directory filters must not delete runtime modules such as yaml/dist/doc");
 assert.doesNotMatch(workflow, /Copy-Item \(Get-Command node\.exe\)\.Source bundle\/node\/node\.exe/,
   "CI must not assemble a Node payload that the v4 installer no longer uses");
 assert.match(verifier, /Invoke-ElectronNode[\s\S]*ELECTRON_RUN_AS_NODE/,
