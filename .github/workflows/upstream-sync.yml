@@ -87,7 +87,7 @@ jobs:
           $sha = git -C upstream rev-parse HEAD
           $manifest = Get-Content upstream/package.json -Raw | ConvertFrom-Json
           $desktop = Get-Content package.json -Raw | ConvertFrom-Json
-          $tag = if ($desktop.version -eq '2.1.0') { 'v2.1' } elseif ($desktop.version -eq '2.2.0') { 'v2.2' } elseif ($desktop.version -eq '3.0.0') { 'v3' } elseif ($desktop.version -eq '3.1.0') { 'v3.1' } elseif ($desktop.version -eq '4.2.0') { 'v4.2' } else { "v$($desktop.version)" }
+          $tag = if ($desktop.version -eq '2.1.0') { 'v2.1' } elseif ($desktop.version -eq '2.2.0') { 'v2.2' } elseif ($desktop.version -eq '3.0.0') { 'v3' } elseif ($desktop.version -eq '3.1.0') { 'v3.1' } elseif ($desktop.version -eq '4.2.0') { 'v4.2' } elseif ($desktop.version -eq '4.3.0') { 'v4.3' } else { "v$($desktop.version)" }
           $releases = @(gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect GitHub Releases' }
           $existing = $releases | Where-Object tag_name -eq $tag | Select-Object -First 1

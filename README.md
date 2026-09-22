@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载 v4.2</strong></a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载 v4.3</strong></a>
   · <a href="#v4-重大升级">重大升级</a>
   · <a href="#为什么选择桌面版">软件优点</a>
   · <a href="#从源码构建">源码构建</a>
@@ -45,7 +45,7 @@
 - **从“每次冷启”到“常驻 + 预热”**：后端拆分为独立 daemon，具备跨进程启动锁、版本/PID/端口握手、随机 token 的 named-pipe 控制通道和三次退避恢复；Windows 登录后静默预热。
 - **构建产物与运行态 ABI 对齐**：compile cache 改由正式 Electron Node 生成，并锁定 Electron 版本以匹配原生模块的 V8 指纹白名单，避免启动即崩。
 - **精简发行体积**：移除与 Electron 内置 Node 重复的 `node.exe`，语言包只保留简体中文、繁体中文和英文，runtime 剔除 PDB、ARM64 预构建、测试夹具、TypeScript 类型源码与包内示例文档。
-- **桌面细节适配**：深浅色跟随系统，兼容 Aqua 主题注册形式，窗口动效可中断，并在系统“减少动态效果”下自动降级。
+- **桌面细节适配**：深浅色跟随系统，兼容 Aqua 主题注册形式，侧栏切换只提交一次原生控件位置，避免逐帧重排造成卡顿。
 - **不污染用户数据**：升级不重置 `~/.dsh`，不把个人插件、配置和凭据写入公共制品。
 - **内核跟随官方最新**：当前锁定 `dsh-v0.1.6-alpha.2`（见 [`upstream-lock.json`](upstream-lock.json)），启动补丁与预设适配同步到新内核结构。
 
@@ -101,16 +101,16 @@
 
 - 启动页、窗口背景和系统标题区域跟随 Windows 深浅色偏好。
 - 设置页兼容 Aqua 主题注册形式，避免主题插件升级后的设置入口失配。
-- 侧栏和窗口控件动效使用可中断的合成动画；系统“减少动态效果”开启时自动降级。
+- 侧栏状态经同一事件循环消抖后只提交一次原生控件位置，避免逐帧 `WebContentsView` 重排。
 - 兼容模式保留必要的菜单、对话框和窗口控件动效，不强行启用高成本背景效果。
 
-### 4. 插件与数据安全
+### 4. 稳定性大幅提升与数据安全
 
 - 保留 `~/.dsh` 中已有的 DSH-IM、Aqua、会话、模型配置和凭据；升级不会重置 profile。
 - 单个第三方插件缺失构建产物时可隔离故障项，避免拖垮整个后端。
 - DSH-IM 等社区插件仍由用户 profile 管理，桌面安装包不把个人插件和配置写入公共制品。
 
-完整升级说明见 [v4.0.2 Release Notes](release-notes-v4.0.2.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
+本次修复见 [v4.3.0 Release Notes](release-notes-v4.3.0.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
 
 ## 为什么选择桌面版
 
@@ -128,7 +128,7 @@
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.2.0`）。
+2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.3.0`）。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -159,7 +159,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面版本 | `4.2.0` |
+| 桌面版本 | `4.3.0` |
 | Harness 版本 | `0.1.6-alpha.2`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
 | 跟进策略 | 官方最新发布标签 → 兼容性验收 → 锁定并发布桌面更新 |
 | 上游分支 | `master` |
