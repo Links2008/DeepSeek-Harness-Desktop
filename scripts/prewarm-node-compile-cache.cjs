@@ -38,8 +38,7 @@ async function main() {
   process.stdout.write(`startup prebundles ready: ${prebundles.length}\n`);
   const failures = [];
   patchHarnessRuntime(runtimeRoot, null, { onFailure: (message) => failures.push(message) });
-  const cacheFailure = failures.find((message) => message.startsWith("compile-cache-flush:"));
-  if (cacheFailure) throw new Error(cacheFailure);
+  if (failures.length) throw new Error(failures.join("\n"));
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-cache-seed-home-"));
   prepareDesktopProfile(home, runtimeRoot);

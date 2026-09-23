@@ -87,7 +87,7 @@ const inherited = spawn(command, [...args], { cwd: options.cwd, env: options.env
 `;
 const patchedUpstream = patchReleaseProcess(upstreamProcessFixture);
 assert.equal(patchedUpstream.changed, true);
-assert.equal((patchedUpstream.source.match(/shell: process\.platform === 'win32'/g) || []).length, 3);
+assert.equal((patchedUpstream.source.match(/shell: process\.platform === 'win32' && !\/\\\.exe\$\/i\.test\(command\)/g) || []).length, 3);
 assert.equal(patchReleaseProcess(patchedUpstream.source).changed, false, "the patch must be idempotent");
 assert.throws(
   () => patchReleaseProcess("spawnSync(command, args, {})"),

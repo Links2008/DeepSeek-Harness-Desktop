@@ -5,17 +5,17 @@ const replacements = [
   {
     label: "captured command",
     before: "spawnSync(command, [...args], { cwd: options.cwd, env: options.env, encoding: 'utf8' })",
-    after: "spawnSync(command, [...args], { shell: process.platform === 'win32', cwd: options.cwd, env: options.env, encoding: 'utf8' })",
+    after: "spawnSync(command, [...args], { shell: process.platform === 'win32' && !/\\.exe$/i.test(command), cwd: options.cwd, env: options.env, encoding: 'utf8' })",
   },
   {
     label: "echoed command",
     before: "spawnSync(command, [...args], {\n    cwd: options.cwd,\n    env: options.env,\n    encoding: 'utf8',\n    stdio: ['inherit', 'pipe', 'pipe'],\n  })",
-    after: "spawnSync(command, [...args], {\n    shell: process.platform === 'win32',\n    cwd: options.cwd,\n    env: options.env,\n    encoding: 'utf8',\n    stdio: ['inherit', 'pipe', 'pipe'],\n  })",
+    after: "spawnSync(command, [...args], {\n    shell: process.platform === 'win32' && !/\\.exe$/i.test(command),\n    cwd: options.cwd,\n    env: options.env,\n    encoding: 'utf8',\n    stdio: ['inherit', 'pipe', 'pipe'],\n  })",
   },
   {
     label: "concurrent inherited command",
     before: "spawn(command, [...args], { cwd: options.cwd, env: options.env, stdio: 'inherit' })",
-    after: "spawn(command, [...args], { shell: process.platform === 'win32', cwd: options.cwd, env: options.env, stdio: 'inherit' })",
+    after: "spawn(command, [...args], { shell: process.platform === 'win32' && !/\\.exe$/i.test(command), cwd: options.cwd, env: options.env, stdio: 'inherit' })",
   },
 ];
 

@@ -179,6 +179,12 @@ assert.match(patchedTheme, /pendingPreference !== void 0 && section\.preference 
   "the 0.1.6 adopt form must reject stale persisted theme preferences");
 assert.equal(patcher.patchTheme(patchedTheme), patchedTheme,
   "the 0.1.6 theme patch must be idempotent");
+const standardPreset = "          - id: tool-plugin-manager\n            name: '@deepseek-ai/dsh-plugin-manager/tools'\n            disabled: true\n";
+const desktopPreset = patcher.patchStandardPreset(standardPreset);
+assert.match(desktopPreset, /          - id: computer-use\n            name: cordis:group/,
+  "Computer Use must be nested in the official standard preset");
+assert.equal(patcher.patchStandardPreset(desktopPreset), desktopPreset,
+  "the 0.1.7 standard preset patch must be idempotent");
 const diagnosedProfileBoot = patcher.patchStartupDiagnostics(`
 async function runProfile(options) {
 \tconst composed = await composeProfile(options.profile, options.patchFiles);
@@ -205,6 +211,19 @@ assert.doesNotMatch(diagnosedProfileBoot, /JSON\.stringify\(fiber/,
   "diagnostics must never serialize fiber config, services, or credentials");
 assert.equal(patcher.patchStartupDiagnostics(diagnosedProfileBoot), diagnosedProfileBoot,
   "startup diagnostics patching must be idempotent");
+const currentProfileBoot = `async function runProfile(options) {
+\ttry {
+\t\tconst composed = await composeProfile(options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile);
+\t\tconst ctx = await boot(NAME, rootConfig, patches, async (hostCtx) => {
+\t\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
+\t\t});
+\t\tapp.current = ctx;
+\t}
+}`;
+const currentDiagnostics = patcher.patchStartupDiagnostics(currentProfileBoot);
+assert.match(currentDiagnostics, /\[dsh-startup\] profile boot-resolved/,
+  "0.1.7 profile boot must retain startup diagnostics");
+assert.equal(patcher.patchStartupDiagnostics(currentDiagnostics), currentDiagnostics);
 assert.match(profilePrebundleSource, /createRequire[\s\S]*import\.meta\.url/,
   "the ESM ws bundle must retain a working CommonJS require for Node built-ins");
 assert.ok(prebundleSource.includes('entry: "dist/providers/all.js"'),
@@ -213,6 +232,8 @@ assert.match(prebundleSource, /args\.kind\s*===\s*"dynamic-import"[\s\S]*externa
   "provider API dynamic imports must remain external and lazy during catalog bundling");
 assert.match(prewarmSource, /files\s*>\s*800/,
   "installer builds must fail when the core startup graph regresses above its bounded ceiling");
+assert.match(prewarmSource, /if \(failures\.length\) throw new Error/,
+  "installer builds must reject every incompatible runtime patch");
 for (const entry of [
   "dist/api/anthropic-messages.lazy.js",
   "dist/api/openai-completions.lazy.js",

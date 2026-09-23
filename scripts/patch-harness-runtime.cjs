@@ -43,37 +43,6 @@ function patchTheme(source) {
   return replaceOnce(source, legacyStaleAnchor, `${legacyStaleAnchor}\n${staleAdoptionGuard}`, "theme stale adoption");
 }
 
-function patchCompaction(source) {
-  source = replaceOnce(source, "const DEFAULT_THRESHOLD_RATIO = .8;", "const DEFAULT_THRESHOLD_RATIO = .65;", "compaction threshold ratio");
-  source = replaceOnce(source, "const DEFAULT_RETAIN_RATIO = .16;", "const DEFAULT_RETAIN_RATIO = .16;\n/** Fixed reserve for provider framing and token-estimation drift. */\nconst OUTPUT_TOKEN_SAFETY_MARGIN = 16384;", "compaction safety margin");
-  source = replaceOnce(source, "function resolveCompactSpec(policy, contextWindow) {", "function resolveCompactSpec(policy, contextWindow, requestedMaxTokens = 0) {", "compaction spec signature");
-  source = replaceOnce(source, "\tconst thresholdTokens = Math.floor(contextWindow * policy.thresholdRatio);", "\tconst ratioThresholdTokens = Math.floor(contextWindow * policy.thresholdRatio);\n\tconst outputSafeThresholdTokens = Math.max(1, contextWindow - requestedMaxTokens - OUTPUT_TOKEN_SAFETY_MARGIN);\n\tconst thresholdTokens = Math.min(ratioThresholdTokens, outputSafeThresholdTokens);", "compaction output reserve");
-  return replaceOnce(source, "resolveCompactSpec(policy, context.contextWindow);", "resolveCompactSpec(policy, context.contextWindow, context.maxTokens ?? 0);", "compaction model capacity");
-}
-
-function patchConversation(source) {
-  const imageBridgeCode = "\n\t\t\t\tconst onImageFiles = (event) => {\n\t\t\t\t\tconst files = event.detail?.files;\n\t\t\t\t\tif (!canAcceptDrop || !Array.isArray(files) || files.length === 0) return;\n\t\t\t\t\tintakeImages(files);\n\t\t\t\t};";
-  if (!source.includes("onImageFiles")) {
-    const hasFilesPattern = /(\t\t\t\tconst\s+hasFiles\s*=\s*\([^)]*\)\s*=>\s*event\.dataTransfer\?\.\s*types\.includes\(["']Files["']\)\s*\?\?\s*false;)/;
-    if (hasFilesPattern.test(source)) {
-      source = source.replace(hasFilesPattern, "$1" + imageBridgeCode);
-    }
-  }
-  if (!source.includes('addEventListener("dsh:image-files"') && !source.includes("addEventListener('dsh:image-files'")) {
-    const dragEnterPattern = /(\t\t\t\tdocument\.addEventListener\(["']dragenter["'],\s*onDragEnter\);)/;
-    if (dragEnterPattern.test(source)) {
-      source = source.replace(dragEnterPattern, "\t\t\t\tdocument.addEventListener(\"dsh:image-files\", onImageFiles);\n$1");
-    }
-  }
-  if (!source.includes('removeEventListener("dsh:image-files"') && !source.includes("removeEventListener('dsh:image-files'")) {
-    const dragEnterRemovePattern = /(\t\t\t\t\tdocument\.removeEventListener\(["']dragenter["'],\s*onDragEnter\);)/;
-    if (dragEnterRemovePattern.test(source)) {
-      source = source.replace(dragEnterRemovePattern, "\t\t\t\t\tdocument.removeEventListener(\"dsh:image-files\", onImageFiles);\n$1");
-    }
-  }
-  return source;
-}
-
 function patchAquaSlotKey(source) {
 	// upstream slots 0.1.0-rc.7 起 settings.plugin.item 为 keyed slot（注册需 options.key）；
 	// marketplace 安装的 aqua 1.3.0 仍按旧 list API 以 id 注册，加载即抛
@@ -84,25 +53,13 @@ function patchAquaSlotKey(source) {
 	if (source.includes(after) || !source.includes(before)) return source;
 	return source.replace(before, after);
 }
-function patchMinimalPreset(source) {
-  if (/^\s*- id: compaction\s*$/m.test(source)) return source;
-  // 0.1.6 把预设迁到 `@deepseek-ai/dsh-agent-presets`，头部注释被重新折行，
-  // 结论句现跨两行，故同时兼容旧的单行与新的折行两种锚点。
-  if (source.includes("Context compaction is absent.")) {
-    source = source.replace("Context compaction is absent.", "Context compaction is mounted internally without changing the two-tool model surface.");
-  } else if (source.includes("Context compaction is\n# absent.")) {
-    source = source.replace("Context compaction is\n# absent.", "Context compaction is mounted internally\n# without changing the two-tool model surface.");
-  }
-  return `${source.trimEnd()}\n\n# Internal context maintenance; these rows do not add model-facing tools.\n- id: compaction\n  name: cordis:group\n  group: true\n  isolate:\n    compaction: true\n    toolResultPruner: true\n  config:\n    - id: compaction-basic\n      name: '@deepseek-ai/dsh-compaction-basic'\n\n    - id: command-compact\n      name: '@deepseek-ai/dsh-command-compact'\n\n    - id: tool-result-pruner\n      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'\n      config:\n        thresholdChars: 8192\n        headChars: 4096\n        tailChars: 1024\n`;
-}
-
-// 官方 0.1.6-alpha 引入 Computer Use（默认关闭）。桌面版把它作为默认能力随
-// 内置 standard 预设发布：exclusive 的 computerUse 服务行必须放进带 isolate
-// realm 的 cordis:group，否则 dsh-agent-presets 会以"发布进程级全局服务"为由
-// 拒绝挂载（这正是"开不了新对话"的根因）。幂等：目标 preset 已有该行时跳过。
+// The official 0.1.7 web-app declares the standard preset in this patch file.
+// Keep desktop Computer Use inside its isolated group, not as a global service.
 function patchStandardPreset(source) {
-  if (/- id:\s*computer-use\b/.test(source)) return source;
-  return `${source.trimEnd()}\n\n# Computer Use (official v0.1.6-alpha, off upstream by default): the exclusive\n# computerUse service plus the in-process Cua Driver native provider. The\n# service row MUST sit inside a group carrying an isolate realm, or\n# dsh-agent-presets rejects the mount for publishing a process-global service.\n- id: computer-use\n  name: cordis:group\n  group: true\n  isolate:\n    computerUse: true\n  config:\n    - id: computer-use-service\n      name: '@deepseek-ai/dsh-computer-use'\n\n    - id: computer-use-cua-driver-native\n      name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'\n`;
+  if (source.includes("          - id: computer-use\n")) return source;
+  const anchor = "          - id: tool-plugin-manager\n            name: '@deepseek-ai/dsh-plugin-manager/tools'\n            disabled: true";
+  const addition = "          - id: computer-use\n            name: cordis:group\n            group: true\n            isolate:\n              computerUse: true\n            config:\n              - id: computer-use-service\n                name: '@deepseek-ai/dsh-computer-use'\n              - id: computer-use-cua-driver-native\n                name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'\n";
+  return replaceOnce(source, anchor, addition + anchor, "standard preset Computer Use");
 }
 
 function patchStartupDiagnostics(source) {
@@ -113,11 +70,10 @@ function patchStartupDiagnostics(source) {
     const syncCompose = "\tconst composed = composeProfile(options.profile, options.patchFiles);";
     const asyncCompose = "\tconst composed = await composeProfile(options.profile, options.patchFiles);";
     const legacyCompose = source.includes(asyncCompose) ? asyncCompose : source.includes(syncCompose) ? syncCompose : null;
-    // 0.1.6 把 composeProfile 移入 try 块，签名扩为五参（profile / patchFiles /
-    // resolutionMode / fromDefaultProfile / resolvedProfile），函数首行不再紧邻
-    // compose，故另提供"就地插入"锚点：插在 compose 调用行之前（同一 try 作用域内，
-    // 后续 boot-resolved 标记与 fiber 监听都在该作用域内，闭包可见）。
-    const currentCompose = "\t\tconst composed = await composeProfile(options.profile, options.patchFiles, resolutionMode, options.fromDefaultProfile, options.resolvedProfile);";
+    // The current compose call lives inside try; keep diagnostics in that scope.
+    const compose17 = "\t\tconst composed = await composeProfile(options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile);";
+    const compose16 = "\t\tconst composed = await composeProfile(options.profile, options.patchFiles, resolutionMode, options.fromDefaultProfile, options.resolvedProfile);";
+    const currentCompose = source.includes(compose17) ? compose17 : compose16;
     if (legacyCompose !== null) {
       const before = `async function runProfile(options) {\n${legacyCompose}`;
       const after = `async function runProfile(options) {
@@ -264,12 +220,7 @@ function patchHarnessRuntime(runtimeRoot, profileDir, options = {}) {
     }
   };
   apply("theme", path.join(modules, "@deepseek-ai", "dsh-client-ui-theme", "lib", "client.js"), patchTheme);
-  apply("compaction", path.join(modules, "@deepseek-ai", "dsh-compaction-basic", "lib", "index.js"), patchCompaction);
-  apply("conversation", path.join(modules, "@deepseek-ai", "dsh-client-ui-conversation", "lib", "client.js"), patchConversation);
-  // 0.1.6 起预设由 `@deepseek-ai/dsh-agent-presets` 提供（旧 `@deepseek-ai/dsh/config/agent-presets` 已移除）。
-  const presets = path.join(modules, "@deepseek-ai", "dsh-agent-presets", "presets");
-  apply("minimal-compaction", path.join(presets, "minimal", "agent.cordis.yml"), patchMinimalPreset);
-  apply("standard-computer-use", path.join(presets, "standard", "agent.cordis.yml"), patchStandardPreset);
+  apply("standard-computer-use", path.join(modules, "@deepseek-ai", "dsh-web-app", "presets", "standard.patch.yml"), patchStandardPreset);
   const dshLib = path.join(modules, "@deepseek-ai", "dsh", "lib");
   if (fs.existsSync(dshLib)) {
     for (const name of fs.readdirSync(dshLib).filter((entry) => /^profile-boot-.+\.js$/.test(entry))) {
@@ -303,4 +254,4 @@ if (require.main === module) {
   process.stdout.write(`${patchHarnessRuntime(path.resolve(runtimeRoot), profileDir && path.resolve(profileDir)).join(",") || "already-patched"}\n`);
 }
 
-module.exports = { patchHarnessRuntime, patchTheme, patchCompaction, patchConversation, patchAquaSlotKey, patchMinimalPreset, patchStandardPreset, patchStartupDiagnostics, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };
+module.exports = { patchHarnessRuntime, patchTheme, patchAquaSlotKey, patchStandardPreset, patchStartupDiagnostics, patchCompileCacheFlush, reconcileClientOnlyPlugins, dedupeAggregatedPluginEntries };

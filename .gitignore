@@ -1,5 +1,8 @@
 node_modules/
 bundle/
+upstream/
+packed-vendor/
+packed-dsh/
 dist/
 installer-dist*/
 work/

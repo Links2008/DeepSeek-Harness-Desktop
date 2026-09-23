@@ -56,7 +56,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     name: 'deepseek-harness-desktop-runtime',
     version: '1.0.0',
     private: true,
-    dependencies: { ...dependencies, dshmarket: '1.44.0' },
+    dependencies: { ...dependencies, dshmarket: '1.57.0' },
     // The store shares the host's settings service, including its prerelease version.
     overrides: { dshmarket: { '@deepseek-ai/dsh-settings': '$@deepseek-ai/dsh-settings' } },
   }, null, 2)}\n`)
