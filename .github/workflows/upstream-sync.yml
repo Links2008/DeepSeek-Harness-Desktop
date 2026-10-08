@@ -23,6 +23,11 @@ on:
     - cron: "17 2 * * *"
   workflow_dispatch:
     inputs:
+      upstream_ref:
+        description: Optional upstream tag or commit to validate (defaults to upstream-lock.json)
+        required: false
+        default: ""
+        type: string
       force:
         description: Rebuild even when the upstream commit is unchanged
         required: false
@@ -56,6 +61,7 @@ jobs:
         id: upstream
         env:
           GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -64,6 +70,8 @@ jobs:
           if ('${{ github.event_name }}' -eq 'schedule') {
             $ref = node scripts/resolve-upstream-release.cjs
             if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the published upstream release' }
+          } elseif ('${{ github.event_name }}' -eq 'workflow_dispatch' -and $env:UPSTREAM_REF) {
+            $ref = $env:UPSTREAM_REF.Trim()
           }
           if (!$ref) { throw 'upstream-lock.json does not define the required revision' }
           "ref=$ref" >> $env:GITHUB_OUTPUT

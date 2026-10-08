@@ -151,6 +151,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 
 
 提交和人工触发验收使用 `upstream-lock.json` 的固定 commit。每日定时兼容性监控选取上游**官方最新发布**的 DSH 标签（含预发布、排除草稿），不追逐未发布的 `master` 提交。监控通过不等于自动安装或自动发布：维护者核对结果、更新锁文件并再次验收后，才发布新的桌面版本。这样既保持跟进，也避免把未经验证的上游变化直接推给用户。
 
+排查特定上游版本时，可在手动验收的 `upstream_ref` 中填写标签或 commit，并勾选 `force`；留空仍使用锁文件。该选项仅用于验收，不提交锁文件或发布 Release。发布前须将 `release-notes-unreleased.md` 中的条目归入实际版本的更新说明并删除待发布文件，否则发布脚本会拒绝创建新 Release。
+
 `verify-installed-runtime.ps1` 的安装/卸载测试只应在干净 CI runner 或虚拟机运行；检测到已有正式安装时会拒绝执行，避免测试清理影响实际安装及快捷方式。
 
 ## 上游与版本谱系

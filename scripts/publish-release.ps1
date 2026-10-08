@@ -130,6 +130,10 @@ try {
     Write-Host "Release $tag already exists and is complete; no files were overwritten"
     return
   }
+  $pendingNotes = Join-Path $root 'release-notes-unreleased.md'
+  if (Test-Path -LiteralPath $pendingNotes) {
+    throw "Move pending updates from release-notes-unreleased.md into release-notes-v$version.md and remove the pending file before publishing"
+  }
   $localTag = @(git tag --list $tag)
   if ($localTag.Count -gt 0 -and (git rev-list -n 1 $tag).Trim() -ne $head) {
     throw "Local tag $tag does not point to HEAD"

@@ -26,6 +26,21 @@ export function resolveLocalClosure(packages, roots) {
   return selected
 }
 
+export function createRuntimeManifest(dependencies) {
+  return {
+    name: 'deepseek-harness-desktop-runtime',
+    version: '1.0.0',
+    private: true,
+    dependencies: { ...dependencies, dshmarket: '1.57.0' },
+    // The store must share the host's services and schema types, including prereleases.
+    overrides: { dshmarket: {
+      '@deepseek-ai/dsh-settings': '$@deepseek-ai/dsh-settings',
+      '@deepseek-ai/cordis': '$@deepseek-ai/cordis',
+      '@deepseek-ai/schemastery': '$@deepseek-ai/schemastery',
+    } },
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   if (!runtimeRoot || tarballRoots.length === 0) {
     throw new Error('usage: node create-runtime-manifest.mjs <runtime-root> <tarball-dir> [...]')
@@ -52,13 +67,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     [...selected].sort().map(name => [name, pathToFileURL(packages.get(name).tarball).href]),
   )
   mkdirSync(runtimeRoot, { recursive: true })
-  writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify({
-    name: 'deepseek-harness-desktop-runtime',
-    version: '1.0.0',
-    private: true,
-    dependencies: { ...dependencies, dshmarket: '1.57.0' },
-    // The store shares the host's settings service, including its prerelease version.
-    overrides: { dshmarket: { '@deepseek-ai/dsh-settings': '$@deepseek-ai/dsh-settings' } },
-  }, null, 2)}\n`)
+  writeFileSync(join(runtimeRoot, 'package.json'), `${JSON.stringify(createRuntimeManifest(dependencies), null, 2)}\n`)
   console.log(`runtime manifest: ${selected.size}/${packages.size} local tarballs in the dsh runtime closure`)
 }
