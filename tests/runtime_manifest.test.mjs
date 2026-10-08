@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { resolveLocalClosure } from '../scripts/create-runtime-manifest.mjs'
+import { createRuntimeManifest, resolveLocalClosure } from '../scripts/create-runtime-manifest.mjs'
 
 const packages = new Map([
   ['@deepseek-ai/dsh', { manifest: {
@@ -41,4 +41,25 @@ assert.throws(
   /runtime root package is missing/,
 )
 
-console.log('runtime manifest dependency closure verified')
+// Match the prerelease host versions that dshmarket's stable peer ranges reject.
+const dependencies = Object.freeze({
+  '@deepseek-ai/dsh-settings': 'file:///C:/packed-dsh/deepseek-ai-dsh-settings-0.2.1-alpha.1.tgz',
+  '@deepseek-ai/cordis': 'file:///C:/packed-vendor/deepseek-ai-cordis-4.0.5-alpha.1.tgz',
+  '@deepseek-ai/schemastery': 'file:///C:/packed-vendor/deepseek-ai-schemastery-3.18.5-alpha.1.tgz',
+  '@deepseek-ai/dsh': 'file:///C:/packed-dsh/deepseek-ai-dsh-0.2.1-alpha.1.tgz',
+})
+const runtime = createRuntimeManifest(dependencies)
+assert.deepEqual(runtime.dependencies, { ...dependencies, dshmarket: '1.57.0' },
+  'the runtime must keep the exact local host tarballs and pinned store version')
+assert.notEqual(runtime.dependencies, dependencies, 'manifest generation must not mutate its input')
+assert.deepEqual(runtime.overrides, { dshmarket: {
+  '@deepseek-ai/dsh-settings': '$@deepseek-ai/dsh-settings',
+  '@deepseek-ai/cordis': '$@deepseek-ai/cordis',
+  '@deepseek-ai/schemastery': '$@deepseek-ai/schemastery',
+} }, 'only dshmarket may override these peers, using the host dependency specs')
+for (const [name, reference] of Object.entries(runtime.overrides.dshmarket)) {
+  assert.equal(reference, `$${name}`)
+  assert.ok(runtime.dependencies[name], `the ${name} override must refer to a runtime dependency`)
+}
+
+console.log('runtime manifest dependency closure and store peer alignment verified')
