@@ -5,6 +5,17 @@ const root = path.resolve(__dirname, "..");
 const runtimeRoot = path.join(root, "bundle", "dsh-runtime");
 const modules = path.join(runtimeRoot, "node_modules");
 
+const otelLeaves = new Set([
+  "@opentelemetry/api-logs",
+  "@opentelemetry/core",
+  "@opentelemetry/resources",
+  "@opentelemetry/sdk-metrics",
+  "@opentelemetry/otlp-transformer",
+  "@opentelemetry/sdk-logs",
+]);
+// Keep api and otlp-exporter-base untouched: their public subpaths import
+// shared private modules and must retain the same instances as their roots.
+
 function packageRoot(name) {
   return path.join(modules, ...name.split("/"));
 }
@@ -35,7 +46,7 @@ function preserveRelativeDynamicImports() {
 }
 
 async function buildEntry(esbuild, spec) {
-  const dir = packageRoot(spec.name);
+  const dir = spec.packageDir ?? packageRoot(spec.name);
   const manifestPath = path.join(dir, "package.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const entry = path.join(dir, spec.entry);
@@ -59,6 +70,62 @@ async function buildEntry(esbuild, spec) {
   manifest.dshDesktopPrebundle = { version: 1, source: `./${spec.entry.replace(/\\/g, "/")}` };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
   return { name: spec.name, bytes: fs.statSync(outfile).size };
+}
+
+function otelPrebundleSpecs(modulesRoot = modules) {
+  const specs = [];
+  function visitModules(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const candidate = path.join(dir, entry.name);
+      if (entry.name.startsWith("@")) {
+        for (const scoped of fs.readdirSync(candidate, { withFileTypes: true })) {
+          if (scoped.isDirectory()) visitPackage(path.join(candidate, scoped.name));
+        }
+      } else {
+        visitPackage(candidate);
+      }
+    }
+  }
+  function visitPackage(dir) {
+    const manifestPath = path.join(dir, "package.json");
+    if (!fs.existsSync(manifestPath)) return;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    if (otelLeaves.has(manifest.name)) {
+      specs.push({
+        name: manifest.name, packageDir: dir,
+        entry: "build/src/index.js", outfile: "build/src/index.dsh-prebundle.cjs", format: "cjs",
+        patch(manifest, target) {
+          const main = manifest.main?.replace(/^\.\//, "");
+          const rootExport = manifest.exports?.["."];
+          if (!["build/src/index.js", "build/src/index.dsh-prebundle.cjs"].includes(main) ||
+              (manifest.exports && (!rootExport || typeof rootExport.default !== "string" ||
+                Object.keys(manifest.exports).some((key) => key !== "." && key !== "./package.json") ||
+                Object.keys(rootExport).some((key) => key !== "types" && key !== "default")))) {
+            throw new Error(`unsupported startup leaf exports: ${manifest.name}`);
+          }
+          manifest.main = target;
+          if (rootExport) rootExport.default = target;
+        },
+      });
+    } else if (manifest.name === "got") {
+      specs.push({
+        name: manifest.name, packageDir: dir,
+        entry: "dist/source/index.js", outfile: "dist/source/index.dsh-prebundle.js", format: "esm",
+        patch(manifest, target) {
+          if (manifest.type !== "module" || typeof manifest.exports?.default !== "string" ||
+              Object.keys(manifest.exports).some((key) => key !== "types" && key !== "default")) {
+            throw new Error(`unsupported startup leaf exports: ${manifest.name}`);
+          }
+          manifest.exports.default = target;
+        },
+      });
+    }
+    visitModules(path.join(dir, "node_modules"));
+  }
+  visitModules(modulesRoot);
+  return specs;
 }
 
 async function prebundleRuntime() {
@@ -149,6 +216,10 @@ async function prebundleRuntime() {
       },
     },
   ];
+  // The shared OTel service added in Harness 0.2 loads these CJS leaf trees
+  // even when Session telemetry is disabled. Collapse each physical copy's
+  // internal files while leaving its external dependencies and service API intact.
+  specs.push(...otelPrebundleSpecs());
   const results = [];
   for (const spec of specs) results.push(await buildEntry(esbuild, spec));
   return results;
@@ -163,4 +234,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { prebundleRuntime, externalizeExcept, preserveRelativeDynamicImports };
+module.exports = { prebundleRuntime, externalizeExcept, preserveRelativeDynamicImports, otelPrebundleSpecs, buildEntry };
