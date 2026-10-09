@@ -230,6 +230,8 @@ assert.ok(prebundleSource.includes('entry: "dist/providers/all.js"'),
   "pi-ai's static provider catalog must be collapsed into one startup file");
 assert.match(prebundleSource, /args\.kind\s*===\s*"dynamic-import"[\s\S]*external:\s*true/,
   "provider API dynamic imports must remain external and lazy during catalog bundling");
+assert.match(prebundleSource, /specs\.push\(\.\.\.otelPrebundleSpecs\(\)\)/,
+  "startup prewarm must include the reviewed OTel leaf copies without disabling their service");
 assert.match(prewarmSource, /files\s*>\s*800/,
   "installer builds must fail when the core startup graph regresses above its bounded ceiling");
 assert.match(prewarmSource, /if \(failures\.length\) throw new Error/,
