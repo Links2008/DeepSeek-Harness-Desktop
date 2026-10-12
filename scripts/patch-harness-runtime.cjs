@@ -8,6 +8,35 @@ function replaceOnce(source, before, after, label) {
 }
 
 function patchTheme(source) {
+  // alpha.2 owns theme/font write ordering. Keep that implementation, with
+  // the desktop rejection handler so transport errors cannot leak a Promise.
+  if (source.includes("\t\t\tpendingWrites = 0;")) {
+    const anchors = [
+      ["theme writer", 'if (isThemePreference(id)) this.write(THEME_PREFERENCE_FIELD, id);'],
+      ["font-size writer", 'this.write(spec.field, px);'],
+      ["font-family writer", 'this.write(FONT_FAMILY_FIELDS[role], list);'],
+      ["deferred adoption", `\t\t\tadopt() {
+\t\t\t\tif (this.pendingWrites > 0) return;
+\t\t\t\tconst section = this.host.getSnapshot().value;`],
+    ];
+    for (const [label, anchor] of anchors) {
+      if (!source.includes(anchor)) throw new Error(`theme upstream ${label}: upstream anchor changed`);
+    }
+    return replaceOnce(source, `\t\t\twrite(field, value) {
+\t\t\t\tthis.pendingWrites += 1;
+\t\t\t\tthis.host.set(field, value).finally(() => {
+\t\t\t\t\tthis.pendingWrites -= 1;
+\t\t\t\t\tthis.adopt();
+\t\t\t\t});
+\t\t\t}`, `\t\t\twrite(field, value) {
+\t\t\t\tthis.pendingWrites += 1;
+\t\t\t\tconst settle = () => {
+\t\t\t\t\tthis.pendingWrites -= 1;
+\t\t\t\t\tthis.adopt();
+\t\t\t\t};
+\t\t\t\tthis.host.set(field, value).then(settle, settle);
+\t\t\t}`, "theme upstream write settlement");
+  }
   source = replaceOnce(source, "\t\t\trevision = 0;\n\t\t\tsnapshot;", "\t\t\trevision = 0;\n\t\t\tpendingPreference;\n\t\t\twriteSequence = 0;\n\t\t\tsnapshot;", "theme state");
   source = replaceOnce(source, `\t\t\tsetTheme(id) {
 \t\t\t\tif (id !== "system" && !this.themes.some((t) => t.id === id)) throw new Error(\`theme "\${id}" is not registered\`);

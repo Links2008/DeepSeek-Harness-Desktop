@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载 v4.4.1</strong></a>
+  <a href="https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest"><strong>下载最新已发布版本</strong></a>
   · <a href="#v4-重大升级">重大升级</a>
   · <a href="#为什么选择桌面版">软件优点</a>
   · <a href="#从源码构建">源码构建</a>
@@ -47,7 +47,7 @@
 - **精简发行体积**：移除与 Electron 内置 Node 重复的 `node.exe`，语言包只保留简体中文、繁体中文和英文，runtime 剔除 PDB、ARM64 预构建、测试夹具、TypeScript 类型源码与包内示例文档。
 - **桌面细节适配**：深浅色跟随系统，兼容 Aqua 主题注册形式，侧栏切换只提交一次原生控件位置，避免逐帧重排造成卡顿。
 - **不污染用户数据**：升级不重置 `~/.dsh`，不把个人插件、配置和凭据写入公共制品。
-- **内核跟随官方最新**：当前锁定 `dsh-v0.2.1-alpha.1`（见 [`upstream-lock.json`](upstream-lock.json)），启动补丁与预设适配同步到新内核结构。
+- **内核跟随官方最新**：当前锁定 `dsh-v0.2.1-alpha.2`（见 [`upstream-lock.json`](upstream-lock.json)），启动补丁与预设适配同步到新内核结构；主题与字体写入使用上游自带的并发保护，保留断线失败的收尾处理，并继续严格校验保护逻辑。
 
 ### 优势在哪里
 
@@ -110,7 +110,7 @@
 - 单个第三方插件缺失构建产物时可隔离故障项，避免拖垮整个后端。
 - DSH-IM 等社区插件仍由用户 profile 管理，桌面安装包不把个人插件和配置写入公共制品。
 
-本次升级见 [v4.4.1 Release Notes](release-notes-v4.4.1.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
+当前源码为待发布的 v4.4.1，需完成新版 Windows 验收后发布。更新内容见 [v4.4.1 Release Notes](release-notes-v4.4.1.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
 
 ## 为什么选择桌面版
 
@@ -128,7 +128,7 @@
 ## 一分钟开始
 
 1. 打开 [Latest Release](https://github.com/Links2008/DeepSeek-Harness-Desktop/releases/latest)。
-2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（当前为 `4.4.1`）。
+2. 下载该 Release 的 `DeepSeekHarness-Setup-<版本>.exe`（版本以 Release 页面为准）。
 3. 运行安装向导并选择安装目录。
 4. 从桌面快捷方式或开始菜单启动 **DeepSeek Harness**。
 
@@ -161,8 +161,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面版本 | `4.4.1` |
-| Harness 版本 | `0.2.1-alpha.1`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
+| 桌面源码版本 | `4.4.1`（待发布） |
+| Harness 版本 | `0.2.1-alpha.2`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
 | 跟进策略 | 官方最新发布标签 → 兼容性验收 → 锁定并发布桌面更新 |
 | 上游分支 | `master` |
 | 锁定提交 | 见 [`upstream-lock.json`](upstream-lock.json) |
