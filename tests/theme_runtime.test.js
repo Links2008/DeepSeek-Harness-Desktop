@@ -5,7 +5,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { patchTheme, patchHarnessRuntime } = require('../scripts/patch-harness-runtime.cjs');
 
-const fixture = fs.readFileSync(path.join(__dirname, 'fixtures', 'theme-alpha2.js.txt'), 'utf8');
+// Match patchFile's normalization when Windows Git checks text out as CRLF.
+const readSource = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const fixture = readSource(path.join(__dirname, 'fixtures', 'theme-alpha2.js.txt'));
 const patchedFixture = patchTheme(fixture);
 assert.match(patchedFixture, /this\.host\.set\(field, value\)\.then\(settle, settle\)/, 'transport rejection must settle without an unhandled Promise');
 assert.doesNotMatch(patchedFixture, /pendingPreference|writeSequence/, 'upstream ordering must not receive the legacy desktop implementation');
@@ -29,9 +31,15 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-native-theme-'));
 try {
   const file = path.join(temporary, 'node_modules', '@deepseek-ai', 'dsh-client-ui-theme', 'lib', 'client.js');
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const failures = [];
+  fs.writeFileSync(file, fixture.replace(/\n/g, '\r\n'));
+  assert.deepEqual(patchHarnessRuntime(temporary, null, { onFailure: (message) => failures.push(message) }), ['theme'],
+    'the production file entry must normalize Windows CRLF before applying the theme patch');
+  assert.deepEqual(failures, []);
+  assert.equal(fs.readFileSync(file, 'utf8'), patchedFixture);
+  assert.deepEqual(patchHarnessRuntime(temporary, null, { onFailure: (message) => failures.push(message) }), []);
   const malformed = fixture.replace('this.pendingWrites -= 1;', '');
   fs.writeFileSync(file, malformed);
-  const failures = [];
   patchHarnessRuntime(temporary, null, { onFailure: (message) => failures.push(message) });
   assert.equal(failures.length, 1, 'incomplete native protection must reach the installer failure callback');
   assert.match(failures[0], /theme upstream write settlement: upstream anchor changed/);
@@ -165,7 +173,7 @@ async function verifyBehavior(Runtime, label) {
   await verifyBehavior(excerptRuntime(patchedFixture), 'alpha2 fixture');
   const bundled = process.env.DSH_THEME_BUNDLE || path.join(__dirname, '..', 'bundle', 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh-client-ui-theme', 'lib', 'client.js');
   if (process.env.DSH_THEME_BUNDLE || fs.existsSync(bundled)) {
-    const source = fs.readFileSync(bundled, 'utf8');
+    const source = readSource(bundled);
     const patched = patchTheme(source);
     if (source.includes('pendingWrites = 0;')) {
       assert.equal(patchTheme(patched), patched, 'the built upstream bundle must retain an idempotent adaptation');
