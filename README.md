@@ -110,7 +110,7 @@
 - 单个第三方插件缺失构建产物时可隔离故障项，避免拖垮整个后端。
 - DSH-IM 等社区插件仍由用户 profile 管理，桌面安装包不把个人插件和配置写入公共制品。
 
-当前源码为待发布的 v4.4.1，需完成新版 Windows 验收后发布。更新内容见 [v4.4.1 Release Notes](release-notes-v4.4.1.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
+当前源码版本为 v4.4.1，已通过 Windows 功能验收；可下载的安装包以 Releases 页面为准。更新内容见 [v4.4.1 Release Notes](release-notes-v4.4.1.md)，历史架构说明见 [v4.0.1 Release Notes](release-notes-v4.0.1.md)。
 
 ## 为什么选择桌面版
 
@@ -161,7 +161,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1 
 
 | 项目 | 当前值 |
 | --- | --- |
-| 桌面源码版本 | `4.4.1`（待发布） |
+| 桌面源码版本 | `4.4.1` |
 | Harness 版本 | `0.2.1-alpha.2`，以 [`upstream-lock.json`](upstream-lock.json) 为准 |
 | 跟进策略 | 官方最新发布标签 → 兼容性验收 → 锁定并发布桌面更新 |
 | 上游分支 | `master` |

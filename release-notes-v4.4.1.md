@@ -1,12 +1,12 @@
 # DeepSeek Harness Desktop v4.4.1
 
-当前为待发布说明，alpha.2 安装包尚需通过本版本的 Windows 构建、安装、启动和卸载验收。
+本版本已通过 [Windows 完整功能验收](https://github.com/Links2008/DeepSeek-Harness-Desktop/actions/runs/38187317909)，覆盖 22 项桌面测试、安装、启动、原生模块、端口释放和卸载。
 
 - 内置 Harness 更新至官方发布的 `dsh-v0.2.1-alpha.2`（精确提交见 `upstream-lock.json`），跟进独立字体与字号设置、工作目录工具，以及上游 Windows PowerShell 大量输出后的收尾修复。
 - 修复插件商店 `dshmarket@1.57.0` 与预发布宿主的依赖解析冲突：商店复用内置的 `cordis`、`schemastery` 和 `dsh-settings`，保留严格的 npm 依赖检查。
-- 适配新增的共享 OpenTelemetry 服务，分别预打包其依赖及嵌套副本。保留原有 800 文件缓存上限、服务接口和遥测配置；alpha.1 的历史验收为 763 个文件，alpha.2 须重新完成 Windows 验收，不能沿用旧制品。
+- 适配新增的共享 OpenTelemetry 服务，分别预打包其依赖及嵌套副本。alpha.2 的 Windows 验收中预热缓存为 766 个文件，保留原有 800 文件上限、服务接口和遥测配置。
 - 适配上游主题状态的新实现：严格确认主题、字号和字体写入均受上游的等待保护后，不再重复注入旧排序补丁；保留网络写入异常的收尾处理，避免未处理的 Promise 拒绝。新增快速切换、交错写入、保存被拒绝或断线后的恢复，以及保护逻辑缺失的回归测试。
-- 保留依赖对齐、模块导出与包实例的回归测试。发布时须同时提供完整安装包、blockmap 和 `latest.yml`；安装器沿用已有 `.dsh` 数据，不重置用户 profile。
+- 保留依赖对齐、模块导出与包实例的回归测试。安装包配套提供 blockmap 和 `latest.yml`；安装器沿用已有 `.dsh` 数据，不重置用户 profile。
 
 ## 升级提醒
 
