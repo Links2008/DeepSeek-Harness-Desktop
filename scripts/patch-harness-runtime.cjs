@@ -8,33 +8,36 @@ function replaceOnce(source, before, after, label) {
 }
 
 function patchTheme(source) {
-  // alpha.2 owns theme/font write ordering. Keep that implementation, with
-  // the desktop rejection handler so transport errors cannot leak a Promise.
+  // 保留上游主题/字体的写入顺序，只补齐传输拒绝时的收尾；rc.2 改用回调统一字段与批量写入。
   if (source.includes("\t\t\tpendingWrites = 0;")) {
+    const operationWriter = source.includes("\t\t\twrite(operation) {");
+    const signature = operationWriter ? "write(operation)" : "write(field, value)";
+    const operation = operationWriter ? "operation()" : "this.host.set(field, value)";
     const anchors = [
-      ["theme writer", 'if (isThemePreference(id)) this.write(THEME_PREFERENCE_FIELD, id);'],
-      ["font-size writer", 'this.write(spec.field, px);'],
-      ["font-family writer", 'this.write(FONT_FAMILY_FIELDS[role], list);'],
+      ["theme writer", operationWriter ? 'if (isThemePreference(id)) this.write(() => this.host.set(THEME_PREFERENCE_FIELD, id));' : 'if (isThemePreference(id)) this.write(THEME_PREFERENCE_FIELD, id);'],
+      ["font-size writer", operationWriter ? 'this.write(() => this.host.set(spec.field, px));' : 'this.write(spec.field, px);'],
+      ["font-family writer", operationWriter ? 'this.write(() => this.host.set(FONT_FAMILY_FIELDS[role], list));' : 'this.write(FONT_FAMILY_FIELDS[role], list);'],
       ["deferred adoption", `\t\t\tadopt() {
 \t\t\t\tif (this.pendingWrites > 0) return;
 \t\t\t\tconst section = this.host.getSnapshot().value;`],
     ];
+    if (operationWriter) anchors.push(["font-size mutation", 'this.write(() => this.host.mutate(ops));']);
     for (const [label, anchor] of anchors) {
       if (!source.includes(anchor)) throw new Error(`theme upstream ${label}: upstream anchor changed`);
     }
-    return replaceOnce(source, `\t\t\twrite(field, value) {
+    return replaceOnce(source, `\t\t\t${signature} {
 \t\t\t\tthis.pendingWrites += 1;
-\t\t\t\tthis.host.set(field, value).finally(() => {
+\t\t\t\t${operation}.finally(() => {
 \t\t\t\t\tthis.pendingWrites -= 1;
 \t\t\t\t\tthis.adopt();
 \t\t\t\t});
-\t\t\t}`, `\t\t\twrite(field, value) {
+\t\t\t}`, `\t\t\t${signature} {
 \t\t\t\tthis.pendingWrites += 1;
 \t\t\t\tconst settle = () => {
 \t\t\t\t\tthis.pendingWrites -= 1;
 \t\t\t\t\tthis.adopt();
 \t\t\t\t};
-\t\t\t\tthis.host.set(field, value).then(settle, settle);
+\t\t\t\t${operation}.then(settle, settle);
 \t\t\t}`, "theme upstream write settlement");
   }
   source = replaceOnce(source, "\t\t\trevision = 0;\n\t\t\tsnapshot;", "\t\t\trevision = 0;\n\t\t\tpendingPreference;\n\t\t\twriteSequence = 0;\n\t\t\tsnapshot;", "theme state");
