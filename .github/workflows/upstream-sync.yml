@@ -164,6 +164,7 @@ jobs:
           node scripts/create-runtime-manifest.mjs bundle/dsh-runtime packed-vendor packed-dsh
           Push-Location bundle/dsh-runtime
           npm install --no-audit --no-fund --package-lock=false --include=optional
+          npm dedupe --prefer-dedupe --no-audit --no-fund --package-lock=false --include=optional
           $runtime = Get-Content package.json -Raw | ConvertFrom-Json
           $runtime.PSObject.Properties.Remove('dependencies')
           $runtime.PSObject.Properties.Remove('overrides')
