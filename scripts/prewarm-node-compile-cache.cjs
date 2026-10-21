@@ -5,6 +5,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { patchHarnessRuntime } = require("./patch-harness-runtime.cjs");
 const { prebundleRuntime } = require("./prebundle-runtime-startup.cjs");
+const { diagnosticNodeOptions } = require("./compile-cache-diagnostics.cjs");
 const { prepareDesktopProfile } = require('./prepare-desktop-profile.cjs');
 const electron = require("electron");
 
@@ -55,6 +56,8 @@ async function main() {
         ELECTRON_RUN_AS_NODE: "1",
         DSH_HOME: home,
         DSH_TELEMETRY_DISABLED: "1",
+        DSH_PREWARM_DIAGNOSTICS: "1",
+        NODE_OPTIONS: diagnosticNodeOptions(process.env.NODE_OPTIONS),
         NODE_COMPILE_CACHE: stage,
         NODE_COMPILE_CACHE_PORTABLE: "1",
       },
@@ -83,6 +86,8 @@ async function main() {
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
 
+    const inventory = output.split(/\r?\n/).find((line) => line.startsWith("[dsh-prewarm] module inventory "));
+    if (inventory) process.stdout.write(`${inventory}\n`);
     const files = countFiles(stage);
     if (files < 100) throw new Error(`cache prewarm produced only ${files} files`);
     // v4.2 enables Computer Use by default, so its closure roots join the seeded
